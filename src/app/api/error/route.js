@@ -28,6 +28,7 @@ export async function POST(request) {
       projectId,
       userAgent,
       timestamp: new Date(),
+      status:'pending'
     });
 
     return new Response(
