@@ -11,6 +11,45 @@ export async function OPTIONS() {
   });
 }
 
+export async function GET(request) {
+  try {
+    const client = await clientPromise;
+    const db = client.db("errors");
+
+    const url = new URL(request.url);
+    const projectId = url.searchParams.get("projectId");
+
+    const query = projectId ? { projectId } : {};
+    const errors = await db
+      .collection("pixpro")
+      .find(query)
+      .sort({ timestamp: -1 })
+      .limit(100)
+      .toArray();
+
+    return new Response(JSON.stringify({ success: true, data: errors }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+  } catch (e) {
+    console.error("Failed to fetch errors:", e);
+    return new Response(
+      JSON.stringify({ success: false, message: "Failed to fetch errors." }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      }
+    );
+  }
+}
+
+
 export async function POST(request) {
   try {
     const { error, projectId } = await request.json();
