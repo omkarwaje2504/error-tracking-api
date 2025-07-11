@@ -11,83 +11,83 @@ export async function OPTIONS() {
   });
 }
 
+// ---------- GET : latest 100 errors (optionally filter by ?projectId=xxx) ----------
 export async function GET(request) {
   try {
-    const client = await clientPromise;
-    const db = client.db("errors");
-
-    const url = new URL(request.url);
+    const url       = new URL(request.url);
     const projectId = url.searchParams.get("projectId");
+    const client    = await clientPromise;
+    const db        = client.db("errors");
 
-    const query = projectId ? { projectId } : {};
-    const errors = await db
-      .collection("pixpro")
-      .find(query)
+    const query  = projectId ? { projectId } : {};
+    const errors = await db.collection("pixpro")
+      .find(query)                        // newest first
       .sort({ timestamp: -1 })
       .limit(100)
+      .project({ screenshot: 0 })         // 🚫 omit large Base64 unless needed
       .toArray();
 
     return new Response(JSON.stringify({ success: true, data: errors }), {
       status: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
+      headers: { "Content-Type": "application/json", ...corsHeaders },
     });
-  } catch (e) {
-    console.error("Failed to fetch errors:", e);
+  } catch (err) {
+    console.error("Failed to fetch errors:", err);
     return new Response(
       JSON.stringify({ success: false, message: "Failed to fetch errors." }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-      }
+      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } },
     );
   }
 }
 
-
+// ---------- POST: save one error report ----------
 export async function POST(request) {
   try {
-    const { error, projectId } = await request.json();
-    const client = await clientPromise;
-    const db = client.db("errors");
+    const body = await request.json();
 
-    const headers = {};
-    request.headers.forEach((value, key) => {
-      headers[key] = value;
-    });
-    const userAgent = headers["user-agent"];
+    /* --------- 1. Required & optional fields --------- */
+    const {
+      error,           // { name, message, stack }
+      mappedStack,     // array from source-map lookup
+      deviceInfo,      // { browser, os, device, screen, userAgent }
+      locationInfo,    // { url, referrer }
+      geo = {},        // { lat, lon, accuracy }  (may be {})
+      screenshot = "", // data:image/png;base64,…  (OPTIONAL / can be huge)
+      projectId = "unknown",
+    } = body;
+
+    if (!error?.message) {
+      return new Response(
+        JSON.stringify({ success: false, message: "Invalid payload." }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } },
+      );
+    }
+
+    /* --------- 2. Persist --------- */
+    const client = await clientPromise;
+    const db     = client.db("errors");
 
     await db.collection("pixpro").insertOne({
-      error,
       projectId,
-      userAgent,
+      error,
+      mappedStack,
+      deviceInfo,
+      locationInfo,
+      geo,
+      screenshot,          // 💾 store inline *only* if size ≤ 2 MB
       timestamp: new Date(),
-      status:'pending'
+      status: "pending",   // triage flag
     });
 
     return new Response(
-      JSON.stringify({ message: "Error received and logged successfully." }),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-      }
+      JSON.stringify({ success: true, message: "Logged successfully." }),
+      { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } },
     );
-  } catch (e) {
-    console.error("Failed to log error:", e);
-    return new Response(JSON.stringify({ message: "Failed to log error." }), {
-      status: 500,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
-    });
+  } catch (err) {
+    console.error("Failed to log error:", err);
+    return new Response(
+      JSON.stringify({ success: false, message: "Failed to log error." }),
+      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } },
+    );
   }
 }
