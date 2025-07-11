@@ -1,14 +1,61 @@
+import { SourceMapConsumer } from "source-map";
+import StackTrace from "stacktrace-js";
+import fs from "fs";
+import path from "path";
 import clientPromise from "../../../../lib/mongodb";
-import { ObjectId } from "mongodb";   // needed by PATCH
+import { ObjectId } from "mongodb"; // needed by PATCH
 
 /* ─────────────────────────────────────────────────────────
    Shared CORS header block
 ───────────────────────────────────────────────────────────*/
 const corsHeaders = {
-  "Access-Control-Allow-Origin":  "*",
+  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
+
+/* ───────────────────────────────────────────────
+   Map minified stack trace to original source
+──────────────────────────────────────────────── */
+async function mapStackTrace(minifiedStack) {
+  try {
+    const frames = await StackTrace.fromError({ stack: minifiedStack });
+    const mappedFrames = [];
+
+    for (const frame of frames) {
+      const file = frame.fileName;
+      if (!file || !file.includes("_next")) continue;
+
+      const mapPath = path.resolve(".next", file.split("/_next/")[1] + ".map");
+
+      if (!fs.existsSync(mapPath)) continue;
+
+      const rawMap = fs.readFileSync(mapPath, "utf8");
+      const consumer = await new SourceMapConsumer(rawMap);
+
+      const pos = consumer.originalPositionFor({
+        line: frame.lineNumber,
+        column: frame.columnNumber,
+      });
+
+      if (pos.source) {
+        mappedFrames.push({
+          function: frame.functionName,
+          source: pos.source,
+          line: pos.line,
+          column: pos.column,
+        });
+      }
+
+      consumer.destroy();
+    }
+
+    return mappedFrames;
+  } catch (err) {
+    console.warn("Stack trace mapping failed:", err);
+    return [];
+  }
+}
 
 /* ───────────────────────── OPTIONS ──────────────────────*/
 export async function OPTIONS() {
@@ -18,19 +65,19 @@ export async function OPTIONS() {
 /* ───────────────────────── GET : list latest errors ─────*/
 export async function GET(request) {
   try {
-    const url       = new URL(request.url);
+    const url = new URL(request.url);
     const projectId = url.searchParams.get("projectId");
 
     const client = await clientPromise;
-    const db     = client.db("errors");
+    const db = client.db("errors");
 
-    const query  = projectId ? { projectId } : {};
+    const query = projectId ? { projectId } : {};
     const errors = await db
       .collection("pixpro")
       .find(query)
       .sort({ timestamp: -1 })
       .limit(100)
-      .project({ screenshot: 0 })            // omit heavy screenshots
+      .project({ screenshot: 0 }) // omit heavy screenshots
       .toArray();
 
     return new Response(JSON.stringify({ success: true, data: errors }), {
@@ -41,7 +88,10 @@ export async function GET(request) {
     console.error("Failed to fetch errors:", err);
     return new Response(
       JSON.stringify({ success: false, message: "Failed to fetch errors." }),
-      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } },
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      }
     );
   }
 }
@@ -49,49 +99,49 @@ export async function GET(request) {
 /* ───────────────────────── POST : create one error doc ─*/
 export async function POST(request) {
   try {
-    const body = await request.json();
-
     const {
-      error,           // { name, message, stack }
-      mappedStack,
+      error, // { name, message, stack }
       deviceInfo,
       locationInfo,
       geo = {},
       screenshot = "",
       projectId = "unknown",
-    } = body;
+    } = await request.json();
 
     if (!error?.message) {
       return new Response(
         JSON.stringify({ success: false, message: "Invalid payload." }),
-        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } },
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
       );
     }
 
-    const client = await clientPromise;
-    const db     = client.db("errors");
+    const mappedStack = await mapStackTrace(error.stack);
 
-    await db.collection("pixpro").insertOne({
+    const client = await clientPromise;
+    await client.db("errors").collection("pixpro").insertOne({
       projectId,
       error,
       mappedStack,
       deviceInfo,
       locationInfo,
       geo,
-      screenshot,      // store inline (limit in front-end if large)
+      screenshot,
       timestamp: new Date(),
       status: "pending",
     });
 
     return new Response(
-      JSON.stringify({ success: true, message: "Logged successfully." }),
-      { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } },
+      JSON.stringify({ success: true, message: "Logged with source map." }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (err) {
     console.error("Failed to log error:", err);
     return new Response(
-      JSON.stringify({ success: false, message: "Failed to log error." }),
-      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } },
+      JSON.stringify({ success: false, message: "Internal server error." }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
 }
@@ -102,7 +152,7 @@ export async function POST(request) {
 ──────────────────────────────────────────────────────────*/
 export async function PATCH(request, { params }) {
   try {
-    const { id }  = params;                 // route is /api/error/[id]
+    const { id } = params; // route is /api/error/[id]
     const { status } = await request.json(); // resolved | rejected | pending
 
     if (!["resolved", "rejected", "pending"].includes(status))
@@ -114,15 +164,18 @@ export async function PATCH(request, { params }) {
       .collection("pixpro")
       .updateOne({ _id: new ObjectId(id) }, { $set: { status } });
 
-    return new Response(
-      JSON.stringify({ success: true }),
-      { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } },
-    );
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    });
   } catch (err) {
     console.error("Failed to update status:", err);
     return new Response(
       JSON.stringify({ success: false, message: "Failed to update status." }),
-      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } },
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      }
     );
   }
 }
