@@ -18,45 +18,31 @@ const corsHeaders = {
    Map minified stack trace to original source
 ──────────────────────────────────────────────── */
 async function mapStackTrace(minifiedStack) {
-  try {
-    const frames = await StackTrace.fromError({ stack: minifiedStack });
-    const mappedFrames = [];
+  const frames = await StackTrace.fromString(minifiedStack);
+  const out = [];
 
-    for (const frame of frames) {
-      const file = frame.fileName;
-      if (!file || !file.includes("_next")) continue;
+  for (const f of frames) {
+    if (!f.fileName) continue;
+    const mapURL = `${f.fileName}.map`;
 
-      const mapPath = path.resolve(".next", file.split("/_next/")[1] + ".map");
+    const resp = await fetch(mapURL, { cache: "force-cache" });
+    if (!resp.ok) continue;
 
-      if (!fs.existsSync(mapPath)) continue;
+    const rawMap = await resp.text();
+    const consumer = await new SourceMapConsumer(rawMap);
 
-      const rawMap = fs.readFileSync(mapPath, "utf8");
-      const consumer = await new SourceMapConsumer(rawMap);
+    const pos = consumer.originalPositionFor({
+      line: f.lineNumber,
+      column: f.columnNumber,
+    });
+    consumer.destroy();
 
-      const pos = consumer.originalPositionFor({
-        line: frame.lineNumber,
-        column: frame.columnNumber,
-      });
-
-      if (pos.source) {
-        mappedFrames.push({
-          function: frame.functionName,
-          source: pos.source,
-          line: pos.line,
-          column: pos.column,
-        });
-      }
-
-      consumer.destroy();
+    if (pos.source) {
+      out.push({ function: f.functionName, ...pos });
     }
-
-    return mappedFrames;
-  } catch (err) {
-    console.warn("Stack trace mapping failed:", err);
-    return [];
   }
+  return out;
 }
-
 /* ───────────────────────── OPTIONS ──────────────────────*/
 export async function OPTIONS() {
   return new Response(null, { status: 204, headers: corsHeaders });
