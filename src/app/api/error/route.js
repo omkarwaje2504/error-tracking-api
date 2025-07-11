@@ -1,9 +1,7 @@
-import { SourceMapConsumer } from "source-map";
-import StackTrace from "stacktrace-js";
-import fs from "fs";
-import path from "path";
+import { SourceMapConsumer } from "source-map-js";
 import clientPromise from "../../../../lib/mongodb";
 import { ObjectId } from "mongodb"; // needed by PATCH
+import { fromError } from "stacktrace-js";
 
 /* ─────────────────────────────────────────────────────────
    Shared CORS header block
@@ -17,25 +15,45 @@ const corsHeaders = {
 /* ───────────────────────────────────────────────
    Map minified stack trace to original source
 ──────────────────────────────────────────────── */
-async function mapStackTrace(minifiedStack) {
-  const frames = await StackTrace.fromString(minifiedStack);
-  const out = [];
 
+export function errorFromString(stackString) {
+  // Split the first line: "Error: Login failed"
+  const [firstLine, ...rest] = stackString.split("\n");
+
+  // Pull out name + message
+  let name = "Error";
+  let message = firstLine;
+
+  const colon = firstLine.indexOf(":");
+  if (colon !== -1) {
+    name = firstLine.slice(0, colon).trim() || "Error";
+    message = firstLine.slice(colon + 1).trim();
+  }
+
+  // Build a new Error and overwrite its stack
+  const err = new Error(message);
+  err.name = name;
+  err.stack = [firstLine, ...rest].join("\n");
+
+  return err;
+}
+
+async function mapStackTrace(minifiedStack) {
+  const errObj = errorFromString(minifiedStack);
+  const frames = await fromError(errObj);
+  const out = [];
   for (const f of frames) {
     if (!f.fileName) continue;
     const mapURL = `${f.fileName}.map`;
 
-    const resp = await fetch(mapURL, { cache: "force-cache" });
+    const resp = await fetch(mapURL, { cache: "no-store" });
     if (!resp.ok) continue;
-
     const rawMap = await resp.text();
-    const consumer = await new SourceMapConsumer(rawMap);
-
+    const consumer = new SourceMapConsumer(rawMap);
     const pos = consumer.originalPositionFor({
       line: f.lineNumber,
       column: f.columnNumber,
     });
-    consumer.destroy();
 
     if (pos.source) {
       out.push({ function: f.functionName, ...pos });
@@ -90,7 +108,6 @@ export async function POST(request) {
       deviceInfo,
       locationInfo,
       geo = {},
-      screenshot = "",
       projectId = "unknown",
     } = await request.json();
 
@@ -114,7 +131,6 @@ export async function POST(request) {
       deviceInfo,
       locationInfo,
       geo,
-      screenshot,
       timestamp: new Date(),
       status: "pending",
     });
