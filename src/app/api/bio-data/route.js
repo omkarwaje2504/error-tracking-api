@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 /* ───────────────────── OPTIONS ───────────────────── */
-export async function OPTIONS() {
+async function OPTIONS() {
   return new Response(null, { status: 204, headers: corsHeaders });
 }
 
