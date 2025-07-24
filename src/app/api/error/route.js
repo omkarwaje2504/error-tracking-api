@@ -12,7 +12,7 @@ const corsHeaders = {
 };
 
 /* ───────────────────── Helper: build Error ───────────────────── */
-export function errorFromString(stackString) {
+function errorFromString(stackString) {
   const [firstLine, ...rest] = stackString.split("\n");
 
   let name = "Error";
