@@ -20,7 +20,7 @@ export async function POST(request) {
     const { renderId, bucketName, folderInS3Console } =
       await renderMediaOnLambda({
         region: "ap-south-1",
-        functionName: "remotion-render-4-0-248-mem2048mb-disk1024mb-600sec",
+        functionName: "remotion-render-4-0-248-mem1536mb-disk512mb-300sec",
         serveUrl:
           "https://remotionlambda-apsouth1-m61gk15thb.s3.ap-south-1.amazonaws.com/sites/pixpro-prop-motion/index.html",
         composition: "RPGBioVideo",
