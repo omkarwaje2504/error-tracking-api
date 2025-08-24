@@ -132,7 +132,7 @@ async function reverseGeocode(latitude, longitude) {
       country: address.country || null,
     };
   } catch (err) {
-    console.warn("Reverse geocoding failed:", err);
+    return errorResponse(err, "Failed to fetch errors.");
     return {};
   }
 }
@@ -175,14 +175,7 @@ export async function GET(request) {
       }
     );
   } catch (err) {
-    console.error("Failed to fetch errors:", err);
-    return new Response(
-      JSON.stringify({ success: false, message: "Failed to fetch errors." }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      }
-    );
+    return errorResponse(err, "Failed to fetch errors.");
   }
 }
 
@@ -271,13 +264,143 @@ export async function POST(request) {
       }
     );
   } catch (err) {
-    console.error("Failed to process POST:", err);
+    return errorResponse(err, "Failed to fetch errors.");
+  }
+}
+
+/* ───────────────────── DELETE ─────────────────────
+   • Delete a single record   → body: { id }
+   • Bulk delete by IDs       → body: { ids: [id1, id2, ...] }
+──────────────────────────────────────────────────── */
+export async function DELETE(request) {
+  try {
+    const body = await request.json();
+
+    const client = await clientPromise;
+    const db = client.db("errors");
+    const collection = db.collection("pixpro");
+
+    /* ---------- 1️⃣ Delete single by ID ---------- */
+    if (body.id) {
+      const result = await collection.deleteOne({
+        _id: ObjectId.createFromHexString(body.id),
+      });
+
+      if (result.deletedCount === 0) {
+        return new Response(
+          JSON.stringify({ success: false, message: "Record not found." }),
+          {
+            status: 404,
+            headers: { "Content-Type": "application/json", ...corsHeaders },
+          }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, message: "Record deleted." }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        }
+      );
+    }
+
+    /* ---------- 2️⃣ Bulk delete by IDs ---------- */
+    if (Array.isArray(body.ids) && body.ids.length > 0) {
+      const objectIds = body.ids.map((id) => ObjectId.createFromHexString(id));
+
+      const result = await collection.deleteMany({
+        _id: { $in: objectIds },
+      });
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: `Deleted ${result.deletedCount} record(s).`,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        }
+      );
+    }
+
     return new Response(
-      JSON.stringify({ success: false, message: "Internal server error." }),
+      JSON.stringify({ success: false, message: "Invalid payload." }),
       {
-        status: 500,
+        status: 400,
         headers: { "Content-Type": "application/json", ...corsHeaders },
       }
     );
+  } catch (err) {
+    return errorResponse(err, "Failed to fetch errors.");
   }
+}
+
+/* ───────────────────── PATCH ─────────────────────
+   • Bulk update statuses → body: { ids: [id1, id2, ...], status }
+──────────────────────────────────────────────────── */
+export async function PATCH(request) {
+  try {
+    const body = await request.json();
+    const { ids, status } = body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return new Response(
+        JSON.stringify({ success: false, message: "IDs array required." }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        }
+      );
+    }
+
+    if (!["resolved", "rejected", "pending"].includes(status)) {
+      return new Response(
+        JSON.stringify({ success: false, message: "Invalid status." }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        }
+      );
+    }
+
+    const client = await clientPromise;
+    const db = client.db("errors");
+    const collection = db.collection("pixpro");
+
+    const objectIds = ids.map((id) => ObjectId.createFromHexString(id));
+
+    const result = await collection.updateMany(
+      { _id: { $in: objectIds } },
+      { $set: { status } }
+    );
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        message: `Updated ${result.modifiedCount} record(s) to '${status}'.`,
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      }
+    );
+  } catch (err) {
+    return errorResponse(err, "Failed to fetch errors.");
+  }
+}
+
+function errorResponse(err, message = "Internal server error.", status = 500) {
+  return new Response(
+    JSON.stringify({
+      success: false,
+      message,
+      error: process.env.NODE_ENV === "development" ? String(err) : undefined,
+    }),
+    {
+      status,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    }
+  );
 }
