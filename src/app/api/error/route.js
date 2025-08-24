@@ -113,7 +113,7 @@ async function reverseGeocode(latitude, longitude) {
     const res = await fetch(nominatim.toString(), {
       headers: {
         "User-Agent":
-          "pixpro-error-tracker/1.0 (bigviz-frontend.projectcampaign.online)",
+          "pixpro-error-tracker/1.0 (platform.informatia.ai)",
       },
     });
 
