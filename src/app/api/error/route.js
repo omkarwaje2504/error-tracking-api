@@ -7,7 +7,7 @@ import { URL } from "url";
 /* ───────────────────── Shared CORS ───────────────────── */
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS, DELETE",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
@@ -132,8 +132,7 @@ async function reverseGeocode(latitude, longitude) {
       country: address.country || null,
     };
   } catch (err) {
-    return errorResponse(err, "Failed to fetch errors.");
-    return {};
+    return errorResponse(err, "Failed to fetch location.");
   }
 }
 
@@ -147,13 +146,9 @@ export async function GET(request) {
   try {
     const url = new URL(request.url);
     const projectId = url.searchParams.get("projectId")?.trim() || null;
-
     const client = await clientPromise;
     const db = client.db("errors");
-
-    // build query: all docs if no projectId, else filter
     const query = projectId ? { projectId } : {};
-
     const errors = await db
       .collection("pixpro")
       .find(query)
@@ -165,7 +160,7 @@ export async function GET(request) {
     return new Response(
       JSON.stringify({
         success: true,
-        filtered: Boolean(projectId), // helpful flag for the frontend
+        filtered: Boolean(projectId),
         count: errors.length,
         data: errors,
       }),
@@ -181,38 +176,10 @@ export async function GET(request) {
 
 /* ───────────────────── POST ─────────────────────
    • Insert a new log  → body: { error, deviceInfo, ... }
-   • Update status     → body: { id, status }
-────────────────────────────────────────────────────── */
+──────────────────────────────────────────────────── */
 export async function POST(request) {
   try {
     const body = await request.json();
-
-    /* ---------- 1️⃣  status update ---------- */
-    if (body.id && body.status) {
-      if (!["resolved", "rejected", "pending"].includes(body.status)) {
-        throw new Error("Invalid status");
-      }
-
-      const client = await clientPromise;
-
-      await client
-        .db("errors")
-        .collection("pixpro")
-        .updateOne(
-          { _id: ObjectId.createFromHexString(body.id) },
-          { $set: { status: body.status } }
-        );
-
-      return new Response(
-        JSON.stringify({ success: true, message: "Status updated." }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
-        }
-      );
-    }
-
-    /* ---------- 2️⃣  create-log ---------- */
     const {
       error,
       deviceInfo,
@@ -253,7 +220,6 @@ export async function POST(request) {
       state,
       country,
       timestamp: new Date(),
-      status: "pending",
     });
 
     return new Response(
@@ -264,28 +230,28 @@ export async function POST(request) {
       }
     );
   } catch (err) {
-    return errorResponse(err, "Failed to fetch errors.");
+    return errorResponse(err, "Failed to log error.");
   }
 }
 
 /* ───────────────────── DELETE ─────────────────────
-   • Delete a single record   → body: { id }
-   • Bulk delete by IDs       → body: { ids: [id1, id2, ...] }
+   • Delete single by error ID: { id }
+   • Bulk delete by IDs: { ids: [id1, id2, ...] }
+   • Bulk delete by projectId: { projectId }
+   • Complete delete: { deleteAll: true }
 ──────────────────────────────────────────────────── */
 export async function DELETE(request) {
   try {
     const body = await request.json();
-
     const client = await clientPromise;
     const db = client.db("errors");
     const collection = db.collection("pixpro");
 
-    /* ---------- 1️⃣ Delete single by ID ---------- */
+    // 1️⃣ Delete single by ID
     if (body.id) {
       const result = await collection.deleteOne({
         _id: ObjectId.createFromHexString(body.id),
       });
-
       if (result.deletedCount === 0) {
         return new Response(
           JSON.stringify({ success: false, message: "Record not found." }),
@@ -295,7 +261,6 @@ export async function DELETE(request) {
           }
         );
       }
-
       return new Response(
         JSON.stringify({ success: true, message: "Record deleted." }),
         {
@@ -305,14 +270,10 @@ export async function DELETE(request) {
       );
     }
 
-    /* ---------- 2️⃣ Bulk delete by IDs ---------- */
+    // 2️⃣ Bulk delete by IDs
     if (Array.isArray(body.ids) && body.ids.length > 0) {
       const objectIds = body.ids.map((id) => ObjectId.createFromHexString(id));
-
-      const result = await collection.deleteMany({
-        _id: { $in: objectIds },
-      });
-
+      const result = await collection.deleteMany({ _id: { $in: objectIds } });
       return new Response(
         JSON.stringify({
           success: true,
@@ -325,6 +286,37 @@ export async function DELETE(request) {
       );
     }
 
+    // 3️⃣ Bulk delete by project group
+    if (body.projectId) {
+      const result = await collection.deleteMany({ projectId: body.projectId });
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: `Deleted ${result.deletedCount} record(s) for project '${body.projectId}'.`,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        }
+      );
+    }
+
+    // 4️⃣ Delete all records
+    if (body.deleteAll === true) {
+      const result = await collection.deleteMany({});
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: `All ${result.deletedCount} record(s) deleted.`,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        }
+      );
+    }
+
+    // Invalid body
     return new Response(
       JSON.stringify({ success: false, message: "Invalid payload." }),
       {
@@ -333,61 +325,7 @@ export async function DELETE(request) {
       }
     );
   } catch (err) {
-    return errorResponse(err, "Failed to fetch errors.");
-  }
-}
-
-/* ───────────────────── PATCH ─────────────────────
-   • Bulk update statuses → body: { ids: [id1, id2, ...], status }
-──────────────────────────────────────────────────── */
-export async function PATCH(request) {
-  try {
-    const body = await request.json();
-    const { ids, status } = body;
-
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return new Response(
-        JSON.stringify({ success: false, message: "IDs array required." }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
-        }
-      );
-    }
-
-    if (!["resolved", "rejected", "pending"].includes(status)) {
-      return new Response(
-        JSON.stringify({ success: false, message: "Invalid status." }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
-        }
-      );
-    }
-
-    const client = await clientPromise;
-    const db = client.db("errors");
-    const collection = db.collection("pixpro");
-
-    const objectIds = ids.map((id) => ObjectId.createFromHexString(id));
-
-    const result = await collection.updateMany(
-      { _id: { $in: objectIds } },
-      { $set: { status } }
-    );
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: `Updated ${result.modifiedCount} record(s) to '${status}'.`,
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      }
-    );
-  } catch (err) {
-    return errorResponse(err, "Failed to fetch errors.");
+    return errorResponse(err, "Failed to delete errors.");
   }
 }
 
