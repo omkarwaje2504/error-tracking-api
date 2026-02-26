@@ -47,19 +47,21 @@ function softmax(arr) {
   return exps.map((v) => v / sum);
 }
 
-export async function GET(req) {
+export async function GET(request) {
   try {
+    const { searchParams } = new URL(request.url);
+    
     return Response.json(
       {
         success: true,
+       
       },
       { headers: corsHeaders },
     );
   } catch (err) {
-    console.error("Error fetching errors:", err);
+    return errorResponse(err, "Failed to fetch errors.");
   }
 }
-
 /* ───────────────────── POST ───────────────────── */
 
 export async function POST(req) {
