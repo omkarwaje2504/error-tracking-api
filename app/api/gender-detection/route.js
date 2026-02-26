@@ -24,6 +24,7 @@ ort.env.wasm.wasmPaths = path.join(
 
 let session = null;
 
+
 async function loadModel() {
   if (!session) {
     const modelPath = path.join(process.cwd(), "models/gender1.onnx");
