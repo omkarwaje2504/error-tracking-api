@@ -1,10 +1,24 @@
 import { NextResponse } from "next/server";
 import * as ort from "onnxruntime-web";
 import sharp from "sharp";
+import path from "path";
 import clientPromise from "@/lib/mongodb";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/* ───────────────────── WASM CONFIG (CRITICAL) ───────────────────── */
+
+// Disable features not supported in Vercel serverless
+ort.env.wasm.simd = false;
+ort.env.wasm.numThreads = 1;
+ort.env.wasm.proxy = false;
+
+// Tell ONNX where wasm files exist in node_modules
+ort.env.wasm.wasmPaths = path.join(
+  process.cwd(),
+  "node_modules/onnxruntime-web/dist/"
+);
 
 /* ───────────────────── Model Singleton ───────────────────── */
 
@@ -12,7 +26,11 @@ let session = null;
 
 async function loadModel() {
   if (!session) {
-    session = await ort.InferenceSession.create("/models/gender1.onnx");
+    const modelPath = path.join(process.cwd(), "models/gender1.onnx");
+
+    session = await ort.InferenceSession.create(modelPath, {
+      executionProviders: ["wasm"],
+    });
 
     console.log("Model loaded");
     console.log("Inputs:", session.inputNames);
@@ -30,8 +48,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-/* ───────────────────── OPTIONS ───────────────────── */
-
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: corsHeaders });
 }
@@ -45,20 +61,6 @@ function softmax(arr) {
   return exps.map((v) => v / sum);
 }
 
-export async function GET(request) {
-  try {
-    const { searchParams } = new URL(request.url);
-
-    return Response.json(
-      {
-        success: true,
-      },
-      { headers: corsHeaders },
-    );
-  } catch (err) {
-    return errorResponse(err, "Failed to fetch errors.");
-  }
-}
 /* ───────────────────── POST ───────────────────── */
 
 export async function POST(req) {
@@ -86,7 +88,7 @@ export async function POST(req) {
     if (!imageUrl) {
       return NextResponse.json(
         { error: "No image URL provided" },
-        { status: 400, headers: corsHeaders },
+        { status: 400, headers: corsHeaders }
       );
     }
 
@@ -118,20 +120,23 @@ export async function POST(req) {
 
     const floatData = new Float32Array(1 * 3 * 224 * 224);
 
-    const mean = [104, 117, 123]; // OpenCV BGR mean
+    const mean = [104, 117, 123]; // BGR mean (OpenCV style)
 
     for (let i = 0; i < 224 * 224; i++) {
       const r = resized[i * 3];
       const g = resized[i * 3 + 1];
       const b = resized[i * 3 + 2];
 
-      // BGR order + mean subtraction
       floatData[i] = b - mean[0];
       floatData[i + 224 * 224] = g - mean[1];
       floatData[i + 2 * 224 * 224] = r - mean[2];
     }
 
-    const inputTensor = new ort.Tensor("float32", floatData, [1, 3, 224, 224]);
+    const inputTensor = new ort.Tensor(
+      "float32",
+      floatData,
+      [1, 3, 224, 224]
+    );
 
     const feeds = {};
     feeds[model.inputNames[0]] = inputTensor;
@@ -145,10 +150,8 @@ export async function POST(req) {
       throw new Error("Model output missing");
     }
 
-    const rawScores = outputTensor.data;
-
-    // Convert logits to probabilities
-    const probabilities = softmax(Array.from(rawScores));
+    const rawScores = Array.from(outputTensor.data);
+    const probabilities = softmax(rawScores);
 
     const femaleScore = probabilities[0];
     const maleScore = probabilities[1];
@@ -169,14 +172,14 @@ export async function POST(req) {
           male: rawScores[1],
         },
       },
-      { headers: corsHeaders },
+      { headers: corsHeaders }
     );
   } catch (err) {
     console.error("Error processing image:", err);
 
     return NextResponse.json(
-      { error: "Processing failed" },
-      { status: 500, headers: corsHeaders },
+      { error: "Processing failed", details: err.message },
+      { status: 500, headers: corsHeaders }
     );
   }
 }
