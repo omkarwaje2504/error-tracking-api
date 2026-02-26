@@ -9,13 +9,13 @@
     "@vercel/functions": "^3.4.3",
     "mongodb": "^6.19.0",
     "next": "latest",
+    "onnxruntime-web": "^1.24.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "sharp": "^0.34.5",
     "source-map": "^0.7.4",
     "source-map-js": "^1.2.1",
-    "stacktrace-js": "^2.0.2",
-    "onnxruntime-node": "^1.24.2"
+    "stacktrace-js": "^2.0.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.12",

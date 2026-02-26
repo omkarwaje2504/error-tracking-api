@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import * as ort from "onnxruntime-node";
+import * as ort from "onnxruntime-web";
 import sharp from "sharp";
 import clientPromise from "@/lib/mongodb";
 
@@ -12,9 +12,7 @@ let session = null;
 
 async function loadModel() {
   if (!session) {
-    session = await ort.InferenceSession.create(
-      `${process.cwd()}/models/gender1.onnx`,
-    );
+    session = await ort.InferenceSession.create("/models/gender1.onnx");
 
     console.log("Model loaded");
     console.log("Inputs:", session.inputNames);
@@ -50,11 +48,10 @@ function softmax(arr) {
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    
+
     return Response.json(
       {
         success: true,
-       
       },
       { headers: corsHeaders },
     );
