@@ -863,7 +863,7 @@ function ErrorRow({ error, selected, checked, onSelect, onCheck, dark }) {
 }
 
 // ─── Main Dashboard ─────────────────────────────────────────────────────────────
-export default function ErrorDashboard() {
+const ErrorDashboard=()=> {
   const [errors, setErrors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
@@ -1527,3 +1527,5 @@ export default function ErrorDashboard() {
     </div>
   );
 }
+
+export default ErrorDashboard;
