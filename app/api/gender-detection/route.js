@@ -66,14 +66,34 @@ function softmax(arr) {
 /* ───────────────────── POST ───────────────────── */
 
 export async function GET() {
-  const dirPath = process.cwd()
-  const data=fs.readdirSync(dirPath)
-  console.log("Current directory:", data)
-
   try {
-    return NextResponse.json({
-      currentPath: data,
-    })
+    const basePath = process.cwd()
+
+    function readDirRecursive(dir, depth = 0, maxDepth = 5) {
+      if (depth > maxDepth) return []
+
+      const items = fs.readdirSync(dir)
+        .filter(item => item !== "node_modules")
+        .slice(0, 5) // only first 5 items per folder
+
+      return items.map(item => {
+        const fullPath = path.join(dir, item)
+        const isDirectory = fs.statSync(fullPath).isDirectory()
+
+        return {
+          name: item,
+          type: isDirectory ? "folder" : "file",
+          children: isDirectory
+            ? readDirRecursive(fullPath, depth + 1, maxDepth)
+            : null
+        }
+      })
+    }
+
+    const data = readDirRecursive(basePath)
+
+    return NextResponse.json({ structure: data })
+
   } catch (error) {
     return NextResponse.json(
       { error: "Failed to read directory" },
