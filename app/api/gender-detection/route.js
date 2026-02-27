@@ -26,18 +26,18 @@ let session = null;
 
 async function loadModel() {
   if (!session) {
-    const modelPath ="https://pixpro-video-generation.s3.ap-south-1.amazonaws.com/gender1.onnx"
+    const modelUrl = "https://pixpro-video-generation.s3.ap-south-1.amazonaws.com/gender1.onnx"
 
-    session = await ort.InferenceSession.create(modelPath, {
+    session = await ort.InferenceSession.create(modelUrl, {
       executionProviders: ["wasm"],
-    });
+    })
 
-    console.log("Model loaded");
-    console.log("Inputs:", session.inputNames);
-    console.log("Outputs:", session.outputNames);
+    console.log("Model loaded from S3")
+    console.log("Inputs:", session.inputNames)
+    console.log("Outputs:", session.outputNames)
   }
 
-  return session;
+  return session
 }
 
 /* ───────────────────── CORS ───────────────────── */
