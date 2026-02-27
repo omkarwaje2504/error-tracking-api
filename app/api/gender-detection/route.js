@@ -64,6 +64,23 @@ function softmax(arr) {
 
 /* ───────────────────── POST ───────────────────── */
 
+export async function GET() {
+  const dirPath = process.cwd()
+
+  try {
+    const files = fs.readdirSync(dirPath)
+
+    return NextResponse.json({
+      currentPath: dirPath,
+      files
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Failed to read directory" },
+      { status: 500 }
+    )
+  }
+}
 export async function POST(req) {
   try {
     /* ───────── Log API Call ───────── */
