@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import * as ort from "onnxruntime-web";
 import sharp from "sharp";
 import path from "path";
+import fs from "fs";
 import clientPromise from "@/lib/mongodb";
 
 export const runtime = "nodejs";
@@ -66,11 +67,12 @@ function softmax(arr) {
 
 export async function GET() {
   const dirPath = process.cwd()
-  console.log("Current directory:", dirPath)
+  const data=fs.readdirSync(dirPath)
+  console.log("Current directory:", data)
 
   try {
     return NextResponse.json({
-      currentPath: dirPath,
+      currentPath: data,
     })
   } catch (error) {
     return NextResponse.json(
