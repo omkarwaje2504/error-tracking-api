@@ -66,13 +66,11 @@ function softmax(arr) {
 
 export async function GET() {
   const dirPath = process.cwd()
+  console.log("Current directory:", dirPath)
 
   try {
-    const files = fs.readdirSync(dirPath)
-
     return NextResponse.json({
       currentPath: dirPath,
-      files
     })
   } catch (error) {
     return NextResponse.json(
