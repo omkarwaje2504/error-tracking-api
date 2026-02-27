@@ -27,7 +27,7 @@ let session = null;
 
 async function loadModel() {
   if (!session) {
-    const modelPath = path.join(process.cwd(), "models/gender1.onnx");
+    const modelPath = path.join(process.cwd(), "models", "gender1.onnx");
 
     session = await ort.InferenceSession.create(modelPath, {
       executionProviders: ["wasm"],
