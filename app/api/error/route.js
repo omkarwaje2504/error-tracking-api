@@ -180,7 +180,7 @@ export async function GET(request) {
       .collection("pixpro")
       .find(query)
       .sort({ timestamp: -1 })
-      .limit(100)
+      .limit(10)
       .project({ screenshot: 0 })
       .toArray();
 
