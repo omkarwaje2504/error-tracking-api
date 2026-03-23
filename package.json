@@ -7,15 +7,18 @@
   },
   "dependencies": {
     "@vercel/functions": "^3.4.3",
+    "konva": "^10.2.0",
     "mongodb": "^6.19.0",
     "next": "latest",
     "onnxruntime-web": "^1.24.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-konva": "^19.2.3",
     "sharp": "^0.34.5",
     "source-map": "^0.7.4",
     "source-map-js": "^1.2.1",
-    "stacktrace-js": "^2.0.2"
+    "stacktrace-js": "^2.0.2",
+    "use-image": "^1.1.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.12",
