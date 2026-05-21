@@ -1,12 +1,11 @@
 import { SourceMapConsumer } from "source-map-js";
 import clientPromise from "@/lib/mongodb";
 import { ObjectId } from "mongodb";
-import { fromError } from "stacktrace-js";
 
-/* ───────────────────── Route Config (Next.js 16) ───────────────────── */
+/* ───────────────────── Route Config (Next.js 15+) ───────────────────── */
 
-export const runtime = "nodejs"; // Required (mongodb + source-map)
-export const dynamic = "force-dynamic"; // Prevent static optimization
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 /* ───────────────────── Shared CORS ───────────────────── */
 
@@ -24,8 +23,30 @@ export async function OPTIONS() {
 
 /* ───────────────────── Helpers ───────────────────── */
 
+/**
+ * Fetch with an AbortController timeout (default 5 s).
+ * Returns null instead of throwing on network/timeout errors.
+ */
+async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    return res;
+  } catch {
+    return null; // timeout or network failure — caller decides what to do
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Reconstruct a minimal Error from a raw stack string so that
+ * stacktrace-js can parse the frames without choking.
+ */
 function errorFromString(stackString = "") {
-  const [firstLine = "Error", ...rest] = stackString.split("\n");
+  const lines = stackString.split("\n");
+  const firstLine = lines[0] ?? "Error";
 
   let name = "Error";
   let message = firstLine;
@@ -38,23 +59,28 @@ function errorFromString(stackString = "") {
 
   const err = new Error(message);
   err.name = name;
-  err.stack = [firstLine, ...rest].join("\n");
+  // Preserve every line so frame parsers see at-frames
+  err.stack = lines.join("\n");
   return err;
 }
 
+/**
+ * Return ±5 lines of context around `line` from a remote source file.
+ * Returns null when the file can't be fetched.
+ */
 async function fetchSnippet(url, line) {
   try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return null;
+    const res = await fetchWithTimeout(url, { cache: "no-store" });
+    if (!res?.ok) return null;
 
     const text = await res.text();
-    const lines = text.split("\n");
+    const allLines = text.split("\n");
 
     const ctx = 5;
     const start = Math.max(0, line - ctx - 1);
-    const end = Math.min(lines.length, line + ctx);
+    const end = Math.min(allLines.length, line + ctx);
 
-    return lines
+    return allLines
       .slice(start, end)
       .map((l, idx) => {
         const ln = start + idx + 1;
@@ -68,60 +94,146 @@ async function fetchSnippet(url, line) {
   }
 }
 
+/* ───────────────────── Stack-trace parser (no stacktrace-js) ───────────────────── */
+
+/**
+ * Parse V8/Firefox stack frames without relying on stacktrace-js,
+ * which can throw when the Error object's stack is non-standard.
+ *
+ * Returns: Array<{ functionName, fileName, lineNumber, columnNumber }>
+ */
+function parseFrames(stackString) {
+  const frames = [];
+  for (const raw of stackString.split("\n")) {
+    const line = raw.trim();
+
+    // V8:  "  at FnName (https://…/file.js:10:5)"
+    // V8:  "  at https://…/file.js:10:5"
+    const v8 = line.match(/^at\s+(?:(.+?)\s+\()?(.+?):(\d+):(\d+)\)?$/);
+    if (v8) {
+      frames.push({
+        functionName: v8[1] ?? "<anonymous>",
+        fileName: v8[2],
+        lineNumber: parseInt(v8[3], 10),
+        columnNumber: parseInt(v8[4], 10),
+      });
+      continue;
+    }
+
+    // Firefox/Safari:  "fnName@https://…/file.js:10:5"
+    const ff = line.match(/^(.*)@(.+):(\d+):(\d+)$/);
+    if (ff) {
+      frames.push({
+        functionName: ff[1] || "<anonymous>",
+        fileName: ff[2],
+        lineNumber: parseInt(ff[3], 10),
+        columnNumber: parseInt(ff[4], 10),
+      });
+    }
+  }
+  return frames;
+}
+
 /* ───────────────────── Source Map Resolver ───────────────────── */
 
 async function mapStackTrace(minifiedStack) {
   if (!minifiedStack) return [];
 
-  const errObj = errorFromString(minifiedStack);
-  const frames = await fromError(errObj);
+  // Gracefully parse frames; never let this throw up to the caller.
+  let frames;
+  try {
+    frames = parseFrames(minifiedStack);
+  } catch {
+    return [];
+  }
+
   const out = [];
 
   for (const f of frames) {
-    if (!f.fileName) continue;
+    if (!f.fileName || !f.lineNumber) continue;
 
+    let consumer = null;
     try {
       const mapURL = `${f.fileName}.map`;
-      const resp = await fetch(mapURL, { cache: "no-store" });
-      if (!resp.ok) continue;
+      const resp = await fetchWithTimeout(mapURL, { cache: "no-store" });
+      if (!resp?.ok) continue;
 
-      const rawMap = await resp.text();
-      const consumer = await new SourceMapConsumer(rawMap);
-
-      const pos = consumer.originalPositionFor({
-        line: f.lineNumber,
-        column: f.columnNumber,
-      });
-
-      if (!pos.source || !pos.line) {
-        consumer.destroy();
+      let rawMap;
+      try {
+        rawMap = await resp.text();
+      } catch {
         continue;
       }
 
-      let sourceText = consumer.sourceContentFor(pos.source, true);
-
-      if (!sourceText) {
-        const absUrl = new URL(pos.source, mapURL).href;
-        sourceText = await fetchSnippet(absUrl, pos.line);
+      // source-map-js SourceMapConsumer constructor is synchronous,
+      // but wrap in try/catch because malformed maps throw.
+      try {
+        consumer = new SourceMapConsumer(rawMap);
+      } catch {
+        continue;
       }
 
-      if (sourceText) {
-        if (out.length) out.push({ separator: true });
+      const pos = consumer.originalPositionFor({
+        line: f.lineNumber,
+        column: f.columnNumber ?? 0,
+      });
 
-        out.push({
-          function: f.functionName,
-          source: pos.source,
-          line: pos.line,
-          column: pos.column,
-          snippet: sourceText.includes("────")
-            ? sourceText
-            : `──────── ${pos.source} ────────\n${sourceText}`,
-        });
+      if (!pos?.source || !pos?.line) continue;
+
+      // Prefer inline source content; fall back to fetching the file.
+      let snippet = null;
+      try {
+        const inlineContent = consumer.sourceContentFor(pos.source, true);
+        if (inlineContent) {
+          const allLines = inlineContent.split("\n");
+          const ctx = 5;
+          const start = Math.max(0, pos.line - ctx - 1);
+          const end = Math.min(allLines.length, pos.line + ctx);
+          snippet = allLines
+            .slice(start, end)
+            .map((l, idx) => {
+              const ln = start + idx + 1;
+              return ln === pos.line
+                ? `>> ${ln.toString().padStart(4)} | ${l}`
+                : `   ${ln.toString().padStart(4)} | ${l}`;
+            })
+            .join("\n");
+        }
+      } catch {
+        // sourceContentFor can throw on missing sources — that's fine
       }
 
-      consumer.destroy(); // 🔥 prevent memory leak
+      // If no inline content, try fetching the original source file
+      if (!snippet) {
+        try {
+          const absUrl = new URL(pos.source, mapURL).href;
+          snippet = await fetchSnippet(absUrl, pos.line);
+        } catch {
+          // Malformed URL or network issue — skip snippet
+        }
+      }
+
+      if (!snippet) continue;
+
+      if (out.length) out.push({ separator: true });
+
+      out.push({
+        function: f.functionName,
+        source: pos.source,
+        line: pos.line,
+        column: pos.column ?? 0,
+        snippet: `──────── ${pos.source} ────────\n${snippet}`,
+      });
     } catch {
+      // Per-frame errors must never abort the whole trace
       continue;
+    } finally {
+      // Always destroy to prevent memory leaks, even on error paths
+      try {
+        consumer?.destroy?.();
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -135,19 +247,26 @@ async function reverseGeocode(lat, lon) {
 
   try {
     const url = new URL("https://nominatim.openstreetmap.org/reverse");
-    url.searchParams.set("lat", lat);
-    url.searchParams.set("lon", lon);
+    url.searchParams.set("lat", String(lat));
+    url.searchParams.set("lon", String(lon));
     url.searchParams.set("format", "json");
 
-    const res = await fetch(url.toString(), {
-      headers: {
-        "User-Agent": "pixpro-error-tracker/1.0",
-      },
-    });
+    const res = await fetchWithTimeout(
+      url.toString(),
+      { headers: { "User-Agent": "pixpro-error-tracker/1.0" } },
+      8000, // slightly more generous for geocoding
+    );
 
-    if (!res.ok) return {};
+    if (!res?.ok) return {};
 
-    const { address = {} } = await res.json();
+    let json;
+    try {
+      json = await res.json();
+    } catch {
+      return {};
+    }
+
+    const address = json?.address ?? {};
 
     return {
       city:
@@ -160,7 +279,7 @@ async function reverseGeocode(lat, lon) {
       country: address.country || null,
     };
   } catch {
-    return {}; // 🔥 fixed (previously returned Response)
+    return {};
   }
 }
 
@@ -202,19 +321,31 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const body = await request.json();
-
-    if (!body?.error?.message) {
+    let body;
+    try {
+      body = await request.json();
+    } catch {
       return Response.json(
-        { success: false, message: "Invalid payload." },
+        { success: false, message: "Malformed JSON body." },
         { status: 400, headers: corsHeaders },
       );
     }
 
-    const mappedStack = await mapStackTrace(body.error.stack);
+    if (!body?.error?.message) {
+      return Response.json(
+        {
+          success: false,
+          message: "Invalid payload: error.message is required.",
+        },
+        { status: 400, headers: corsHeaders },
+      );
+    }
 
-    const geo = body.geo || {};
-    const location = await reverseGeocode(geo.lat, geo.lon);
+    // Both are safe — they return [] / {} on any internal failure
+    const [mappedStack, location] = await Promise.all([
+      mapStackTrace(body.error?.stack).catch(() => []),
+      reverseGeocode(body.geo?.lat, body.geo?.lon).catch(() => ({})),
+    ]);
 
     const client = await clientPromise;
 
@@ -223,12 +354,18 @@ export async function POST(request) {
       .collection("pixpro")
       .insertOne({
         projectId: body.projectId || "unknown",
-        error: body.error,
+        error: {
+          message: body.error.message,
+          name: body.error.name ?? "Error",
+          stack: body.error.stack ?? null,
+        },
         mappedStack,
-        deviceInfo: body.deviceInfo,
-        locationInfo: body.locationInfo,
-        geo,
-        ...location,
+        deviceInfo: body.deviceInfo ?? null,
+        locationInfo: body.locationInfo ?? null,
+        geo: body.geo ?? {},
+        city: location.city ?? null,
+        state: location.state ?? null,
+        country: location.country ?? null,
         timestamp: new Date(),
       });
 
@@ -245,15 +382,28 @@ export async function POST(request) {
 
 export async function DELETE(request) {
   try {
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json(
+        { success: false, message: "Malformed JSON body." },
+        { status: 400, headers: corsHeaders },
+      );
+    }
+
     const client = await clientPromise;
     const collection = client.db("errors").collection("pixpro");
 
-    if (body.id && ObjectId.isValid(body.id)) {
-      const result = await collection.deleteOne({
-        _id: new ObjectId(body.id),
-      });
-
+    // Single ID
+    if (body.id) {
+      if (!ObjectId.isValid(body.id)) {
+        return Response.json(
+          { success: false, message: "Invalid ObjectId." },
+          { status: 400, headers: corsHeaders },
+        );
+      }
+      const result = await collection.deleteOne({ _id: new ObjectId(body.id) });
       return Response.json(
         {
           success: result.deletedCount > 0,
@@ -264,41 +414,38 @@ export async function DELETE(request) {
       );
     }
 
+    // Multiple IDs
     if (Array.isArray(body.ids)) {
       const objectIds = body.ids
-        .filter(ObjectId.isValid)
+        .filter((id) => ObjectId.isValid(id))
         .map((id) => new ObjectId(id));
 
-      const result = await collection.deleteMany({
-        _id: { $in: objectIds },
-      });
+      if (!objectIds.length) {
+        return Response.json(
+          { success: false, message: "No valid IDs provided." },
+          { status: 400, headers: corsHeaders },
+        );
+      }
 
+      const result = await collection.deleteMany({ _id: { $in: objectIds } });
       return Response.json(
-        {
-          success: true,
-          message: `Deleted ${result.deletedCount} record(s).`,
-        },
+        { success: true, message: `Deleted ${result.deletedCount} record(s).` },
         { headers: corsHeaders },
       );
     }
 
+    // By projectId
     if (body.projectId) {
-      const result = await collection.deleteMany({
-        projectId: body.projectId,
-      });
-
+      const result = await collection.deleteMany({ projectId: body.projectId });
       return Response.json(
-        {
-          success: true,
-          message: `Deleted ${result.deletedCount} record(s).`,
-        },
+        { success: true, message: `Deleted ${result.deletedCount} record(s).` },
         { headers: corsHeaders },
       );
     }
 
+    // Nuke everything
     if (body.deleteAll === true) {
       const result = await collection.deleteMany({});
-
       return Response.json(
         {
           success: true,
@@ -320,6 +467,7 @@ export async function DELETE(request) {
 /* ───────────────────── Error Handler ───────────────────── */
 
 function errorResponse(err, message = "Internal server error.") {
+  console.error(`[pixpro] ${message}`, err); // always log server-side
   return Response.json(
     {
       success: false,
