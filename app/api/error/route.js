@@ -288,25 +288,68 @@ async function reverseGeocode(lat, lon) {
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
+    const id = searchParams.get("id");
     const projectId = searchParams.get("projectId");
 
     const client = await clientPromise;
-    const db = client.db("errors");
+    const collection = client.db("errors").collection("pixpro");
+
+    /* ── Single error detail (full doc, incl. screenshot) ── */
+    if (id) {
+      if (!ObjectId.isValid(id)) {
+        return Response.json(
+          { success: false, message: "Invalid ObjectId." },
+          { status: 400, headers: corsHeaders },
+        );
+      }
+
+      const doc = await collection.findOne({ _id: new ObjectId(id) });
+
+      if (!doc) {
+        return Response.json(
+          { success: false, message: "Error not found." },
+          { status: 404, headers: corsHeaders },
+        );
+      }
+
+      return Response.json(
+        { success: true, data: doc },
+        { headers: corsHeaders },
+      );
+    }
+
+    /* ── Paginated list (no longer hard-capped at 10) ── */
+    const page = Math.max(
+      1,
+      parseInt(searchParams.get("page") || "1", 10) || 1,
+    );
+    const rawLimit = parseInt(searchParams.get("limit") || "20", 10);
+    // default 20, capped at 200 so a bad client can't pull the whole DB at once
+    const limit =
+      Number.isNaN(rawLimit) || rawLimit <= 0 ? 20 : Math.min(rawLimit, 200);
+    const skip = (page - 1) * limit;
 
     const query = projectId ? { projectId } : {};
 
-    const errors = await db
-      .collection("pixpro")
-      .find(query)
-      .sort({ timestamp: -1 })
-      .limit(10)
-      .project({ screenshot: 0 })
-      .toArray();
+    const [errors, total] = await Promise.all([
+      collection
+        .find(query)
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(limit)
+        .project({ screenshot: 0 }) // list view stays light
+        .toArray(),
+      collection.countDocuments(query),
+    ]);
 
     return Response.json(
       {
         success: true,
         filtered: Boolean(projectId),
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
         count: errors.length,
         data: errors,
       },
