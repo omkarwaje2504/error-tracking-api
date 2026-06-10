@@ -19,7 +19,7 @@ export async function GET(request) {
     const projectId = searchParams.get("projectId"); // optional filter
     const topN = Math.min(
       parseInt(searchParams.get("top") || "50", 10) || 50,
-      200,
+      1000,
     );
 
     const match = projectId ? { projectId } : {};
