@@ -32,3 +32,8 @@ if (process.env.NODE_ENV === "development") {
 attachDatabasePool(client);
 
 export default client;
+
+export async function connectDB() {
+  await client.connect();
+  return client.db("task-tracker");
+}
