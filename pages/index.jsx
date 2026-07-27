@@ -25,6 +25,7 @@ import {
   FaImage,
   FaFileExcel,
   FaDownload,
+  FaTrashAlt
 } from "react-icons/fa";
 import { IoRefresh, IoClose } from "react-icons/io5";
 import {
@@ -39,7 +40,7 @@ import {
   CartesianGrid,
 } from "recharts";
 
-const API = "http://localhost:3000/api/error";
+const API = "https://my-server-jade-beta.vercel.app/api/error";
 const ANALYTICS = `${API}/analytics`;
 const EXPORT = `${API}/export`;
 const ALLOWED_STATUSES = ["pending", "resolved", "rejected"];
@@ -591,6 +592,72 @@ const ErrorDetail = ({ error, loading, onBack, onResolve, onReject }) => {
   );
 };
 
+const DeleteAllModal = ({ open, onClose, onConfirm, total, deleting }) => {
+  const [confirmText, setConfirmText] = useState("");
+
+  useEffect(() => {
+    if (open) setConfirmText("");
+  }, [open]);
+
+  if (!open) return null;
+  const armed = confirmText.trim().toUpperCase() === "DELETE";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm et-in"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm mx-4 bg-neutral-900 border border-white/10 rounded-xl p-5 et-slide"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2 mb-3">
+          <div className="p-1.5 rounded-md bg-white/5 border border-white/10 text-neutral-200">
+            <FaExclamationTriangle className="text-xs" />
+          </div>
+          <h3 className="text-sm font-semibold text-white">Delete all errors</h3>
+        </div>
+
+        <p className="text-xs text-neutral-400 leading-relaxed mb-3">
+          This permanently deletes{" "}
+          <span className="text-white font-mono">{total}</span> record
+          {total === 1 ? "" : "s"} across every project. This cannot be undone.
+          Type <span className="text-white font-mono">DELETE</span> to confirm.
+        </p>
+
+        <input
+          value={confirmText}
+          onChange={(e) => setConfirmText(e.target.value)}
+          placeholder="DELETE"
+          className="w-full px-3 py-2 bg-neutral-800 border border-white/10 rounded-md text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-white/40 font-mono"
+        />
+
+        <div className="flex items-center justify-end gap-2 mt-5">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={onConfirm}
+            disabled={!armed || deleting}
+          >
+            {deleting ? (
+              <>
+                <IoRefresh className="animate-spin" /> Deleting…
+              </>
+            ) : (
+              <>
+                <FaTrashAlt /> Delete all
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /* =================================================================
    Main dashboard
 ================================================================= */
@@ -604,8 +671,14 @@ export default function ErrorTrackingDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
+  // export data
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  // delete view
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
+
 
   // detail view
   const [selectedError, setSelectedError] = useState(null);
@@ -1068,6 +1141,25 @@ export default function ErrorTrackingDashboard() {
     clearSelection();
   };
 
+  const deleteAll = useCallback(async () => {
+    setDeletingAll(true);
+    try {
+      await fetch(API, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deleteAll: true }),
+      });
+      clearSelection();
+      setDeleteAllOpen(false);
+      setPage(1);
+      await fetchAll(true);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDeletingAll(false);
+    }
+  }, [fetchAll, clearSelection]);
+
   /* ---------- selection summary (current page) ---------- */
   const selectedCount = useMemo(
     () => filtered.filter((e) => selectedIds.has(e._id)).length,
@@ -1137,7 +1229,13 @@ export default function ErrorTrackingDashboard() {
         defaultProject={projectFilter}
         exporting={exporting}
       />
-
+      <DeleteAllModal
+        open={deleteAllOpen}
+        onClose={() => setDeleteAllOpen(false)}
+        onConfirm={deleteAll}
+        total={totalInDb}
+        deleting={deletingAll}
+      />
       {/* ---------- Header ---------- */}
       <header className="sticky top-0 z-30 bg-black/90 backdrop-blur border-b border-white/10">
         <div className="max-w-7xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
@@ -1179,10 +1277,22 @@ export default function ErrorTrackingDashboard() {
               <span className="hidden sm:inline">Refresh</span>
             </Button>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => setExportOpen(true)}>
-            <FaFileExcel />
-            <span className="hidden sm:inline">Export</span>
-          </Button>
+          <div className="space-x-2">
+
+            <Button variant="ghost" size="sm" className="border border-gray-700" onClick={() => setExportOpen(true)}>
+              <FaFileExcel />
+              <span className="hidden sm:inline">Export</span>
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setDeleteAllOpen(true)}
+              disabled={totalInDb === 0}
+            >
+              <FaTrashAlt />
+              <span className="hidden sm:inline">Delete all</span>
+            </Button>
+          </div>
         </div>
       </header>
 
