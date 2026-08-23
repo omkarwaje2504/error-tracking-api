@@ -15,8 +15,11 @@ export async function POST(req) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const db = await connectDB();
-    const { name, description } = await req.json();
-    const doc = { name, description, deleted: false, createdAt: new Date() };
+    const { name } = await req.json();
+    if (!name || !name.trim()) {
+        return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+    }
+    const doc = { name: name.trim(), deleted: false, createdAt: new Date() };
     const { insertedId } = await db.collection('companies').insertOne(doc);
     return NextResponse.json({ _id: insertedId, ...doc });
 }

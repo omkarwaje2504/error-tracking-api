@@ -1,6 +1,7 @@
 import { connectDB } from '@/lib/mongodb';
 import { oid } from '@/lib/objectId';
 import { getSession } from '@/lib/auth';
+import { logActivity } from '@/lib/activity';
 import { NextResponse } from 'next/server';
 
 export async function GET(req) {
@@ -11,6 +12,7 @@ export async function GET(req) {
     const parentId = new URL(req.url).searchParams.get('parent');
     const teamFilter = new URL(req.url).searchParams.get('team');
     const assigneeFilter = new URL(req.url).searchParams.get('assignee');
+    const mineOnly = new URL(req.url).searchParams.get('mine') === 'true';
 
     const match = { deleted: { $ne: true } };
 
@@ -29,7 +31,10 @@ export async function GET(req) {
     }
 
 
-    if (session.role === 'team-member') {
+    if (mineOnly) {
+        // Personal "my tasks" view (dashboard) — always self-scoped, regardless of role.
+        match.assignedTo = oid(session.id);
+    } else if (session.role === 'team-member') {
         match.assignedTo = oid(session.id);
     } else if (session.role === 'lead') {
         const teammates = await db.collection('users')
@@ -61,8 +66,9 @@ export async function GET(req) {
         { $unwind: { path: '$createdBy', preserveNullAndEmptyArrays: true } },
         {
             $project: {
-                title: 1, description: 1, status: 1, createdAt: 1,
+                title: 1, description: 1, status: 1, createdAt: 1, completedAt: 1,
                 trackProgress: 1, unit: 1, target: 1, parentTask: 1, department: 1,
+                priority: 1, dueDate: 1, stageType: 1, stageId: 1, attachments: 1,
                 'project._id': 1, 'project.name': 1,
                 'assignedTo._id': 1, 'assignedTo.name': 1, 'assignedTo.team': 1,
                 'createdBy._id': 1, 'createdBy.name': 1,
@@ -74,7 +80,7 @@ export async function GET(req) {
                 let: { taskId: '$_id' },
                 pipeline: [
                     { $match: { $expr: { $eq: ['$task', '$$taskId'] }, deleted: { $ne: true } } },
-                    { $group: { _id: null, added: { $sum: '$added' }, completed: { $sum: '$completed' } } },
+                    { $group: { _id: null, added: { $sum: '$added' }, completed: { $sum: '$completed' }, declined: { $sum: '$declined' } } },
                 ],
                 as: 'progress',
             }
@@ -99,7 +105,7 @@ export async function GET(req) {
 
         {
             $addFields: {
-                progress: { $ifNull: [{ $arrayElemAt: ['$progress', 0] }, { added: 0, completed: 0 }] },
+                progress: { $ifNull: [{ $arrayElemAt: ['$progress', 0] }, { added: 0, completed: 0, declined: 0 }] },
             }
         },
     ]).toArray();
@@ -110,10 +116,16 @@ export async function POST(req) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const db = await connectDB();
-    const { title, description, project, assignedTo, trackProgress, unit, target, parentTask, department } = await req.json();
+    const {
+        title, description, project, assignedTo, trackProgress, unit, target,
+        parentTask, department, priority, dueDate, stageType, stageId, attachments,
+    } = await req.json();
+    if (!title || !title.trim()) {
+        return NextResponse.json({ error: 'Title is required' }, { status: 400 });
+    }
     const doc = {
         title, description,
-        project: oid(project),
+        project: project ? oid(project) : null,
         assignedTo: (assignedTo || []).map(oid),
         createdBy: oid(session.id),
         status: 'pending', deleted: false, createdAt: new Date(),
@@ -122,8 +134,23 @@ export async function POST(req) {
         target: target ? Number(target) : null,
         parentTask: parentTask ? oid(parentTask) : null,
         department: department || '',
+        priority: ['low', 'medium', 'high', 'urgent'].includes(priority) ? priority : 'medium',
+        dueDate: dueDate || null,
+        stageType: stageType || null,
+        stageId: stageId || null,
+        attachments: attachments || [],
     };
-    console.log(doc)
     const { insertedId } = await db.collection('tasks').insertOne(doc);
+
+    if (!parentTask) {
+        await logActivity(db, {
+            type: 'task.created',
+            message: `${session.name} created task "${title}"`,
+            project: doc.project,
+            task: insertedId,
+            user: session.id,
+        });
+    }
+
     return NextResponse.json({ _id: insertedId, ...doc });
 }

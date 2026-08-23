@@ -47,7 +47,7 @@ export default function LoginPage() {
         </div>
 
         {/* Heading */}
-        <h1 className="bg-gradient-to-r from-neutral-400 via-white to-neutral-400 bg-clip-text text-center text-[28px] font-bold tracking-tight text-transparent">
+        <h1 className="bg-gradient-to-r from-neutral-600 via-neutral-950 to-neutral-600 bg-clip-text text-center text-[28px] font-bold tracking-tight text-transparent dark:from-neutral-400 dark:via-white dark:to-neutral-400">
           {mode === "login" ? "Welcome to Task Tracker" : "Create your account"}
         </h1>
         <p className="mb-8 mt-1.5 text-center text-sm text-neutral-500">
@@ -122,7 +122,7 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => setShowPass((s) => !s)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-300"
               aria-label="Toggle password"
             >
               {showPass ? <EyeOff /> : <Eye />}
@@ -131,10 +131,10 @@ export default function LoginPage() {
         </Field>
 
         {mode === "login" && (
-          <label className="mb-5 mt-1 flex cursor-pointer items-center gap-2 text-sm text-neutral-400">
+          <label className="mb-5 mt-1 flex cursor-pointer items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-line bg-panel2 accent-white"
+              className="h-4 w-4 rounded border-line bg-panel2 accent-neutral-900 dark:accent-white"
             />
             Stay logged in
           </label>
@@ -145,7 +145,7 @@ export default function LoginPage() {
         <button
           onClick={submit}
           disabled={loading}
-          className="w-full rounded-xl bg-neutral-400 py-3 font-medium text-black transition-colors hover:bg-neutral-300 disabled:opacity-50"
+          className="btn-primary w-full !py-3 disabled:opacity-50"
         >
           {loading ? "..." : mode === "login" ? "Log in" : "Register"}
         </button>
@@ -155,7 +155,7 @@ export default function LoginPage() {
             ? "Don't you have an account? "
             : "Have an account? "}
           <span
-            className="cursor-pointer font-semibold text-neutral-200 hover:text-white"
+            className="cursor-pointer font-semibold text-neutral-800 hover:text-neutral-950 dark:text-neutral-200 dark:hover:text-white"
             onClick={() => {
               setMode(mode === "login" ? "register" : "login");
               setError("");
@@ -172,7 +172,7 @@ export default function LoginPage() {
 function Field({ label, children, className = "mb-4" }) {
   return (
     <div className={className}>
-      <label className="mb-1.5 block text-sm font-semibold text-neutral-200">
+      <label className="mb-1.5 block text-sm font-semibold text-neutral-800 dark:text-neutral-200">
         {label}
       </label>
       {children}

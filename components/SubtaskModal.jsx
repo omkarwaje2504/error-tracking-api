@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Modal from './Modal';
+import { toast } from '@/lib/toast';
+import { confirmDialog } from '@/lib/confirm';
 
 export default function SubtaskModal({ task, users, open, onClose, onChange }) {
     const [subs, setSubs] = useState([]);
@@ -15,8 +17,8 @@ export default function SubtaskModal({ task, users, open, onClose, onChange }) {
     }
 
     async function add() {
-        if (!title.trim()) return;
-        await fetch('/api/tasks', {
+        if (!title.trim()) return toast.error('Subtask title is required.');
+        const res = await fetch('/api/tasks', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 title,
@@ -25,6 +27,7 @@ export default function SubtaskModal({ task, users, open, onClose, onChange }) {
                 assignedTo: assignee ? [assignee] : [],
             }),
         });
+        if (!res.ok) return toast.error('Failed to add subtask.');
         setTitle(''); setAssignee('');
         await load(); onChange?.();
     }
@@ -38,8 +41,10 @@ export default function SubtaskModal({ task, users, open, onClose, onChange }) {
     }
 
     async function remove(id) {
-        if (!confirm('Delete this subtask?')) return;
+        const ok = await confirmDialog('Delete this subtask?', { danger: true, confirmLabel: 'Delete' });
+        if (!ok) return;
         await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+        toast.success('Subtask deleted.');
         await load(); onChange?.();
     }
 
@@ -75,7 +80,7 @@ export default function SubtaskModal({ task, users, open, onClose, onChange }) {
                     <div key={s._id} className="flex items-center gap-3 border-b border-line/60 py-2.5 last:border-0">
                         <input
                             type="checkbox"
-                            className="h-[18px] w-[18px] shrink-0 accent-white"
+                            className="h-[18px] w-[18px] shrink-0 accent-neutral-900 dark:accent-white"
                             checked={s.status === 'completed'}
                             onChange={() => toggle(s)}
                         />

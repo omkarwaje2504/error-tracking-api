@@ -1,5 +1,3 @@
-
-
 import { connectDB } from '@/lib/mongodb';
 import { oid } from '@/lib/objectId';
 import { getSession } from '@/lib/auth';
@@ -19,7 +17,7 @@ export async function GET(req) {
         { $sort: { createdAt: -1 } },
         { $lookup: { from: 'companies', localField: 'company', foreignField: '_id', as: 'company' } },
         { $unwind: { path: '$company', preserveNullAndEmptyArrays: true } },
-        { $project: { name: 1, description: 1, createdAt: 1, 'company._id': 1, 'company.name': 1 } },
+        { $project: { name: 1, createdAt: 1, 'company._id': 1, 'company.name': 1 } },
     ]).toArray();
 
     return NextResponse.json(brands);
@@ -29,12 +27,24 @@ export async function POST(req) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const db = await connectDB();
-    const { name, description, company } = await req.json();
+    const { name, company } = await req.json();
+    if (!name || !name.trim()) {
+        return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+    }
+
+    let companyDoc = null;
+    if (company) {
+        companyDoc = await db.collection('companies').findOne({ _id: oid(company) });
+        if (companyDoc && companyDoc.name.trim().toLowerCase() === name.trim().toLowerCase()) {
+            return NextResponse.json({ error: 'A brand cannot have the same name as its company' }, { status: 400 });
+        }
+    }
+
     const doc = {
-        name, description,
+        name: name.trim(),
         company: company ? oid(company) : null,
         deleted: false, createdAt: new Date(),
     };
     const { insertedId } = await db.collection('brands').insertOne(doc);
-    return NextResponse.json({ _id: insertedId, ...doc });
+    return NextResponse.json({ _id: insertedId, ...doc, company: companyDoc });
 }

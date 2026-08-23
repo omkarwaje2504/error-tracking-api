@@ -2,14 +2,19 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import {
+  FiCompass, FiHome, FiBriefcase, FiFolder, FiCheckSquare, FiUsers, FiUserCheck, FiLogOut,
+} from "react-icons/fi";
+import ThemeToggle from "./ThemeToggle";
 
 const links = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/companies", label: "Companies" },
-  { href: "/brands", label: "Brands" },
-  { href: "/projects", label: "Projects" },
-  { href: "/tasks", label: "Tasks" },
-  { href: "/users", label: "Users" },
+  { href: "/overview", label: "Overview", icon: FiCompass, roles: ["head"] },
+  { href: "/dashboard", label: "Dashboard", icon: FiHome },
+  { href: "/companies", label: "Companies", icon: FiBriefcase },
+  { href: "/projects", label: "Projects", icon: FiFolder },
+  { href: "/tasks", label: "Tasks", icon: FiCheckSquare },
+  { href: "/team", label: "Team Structure", icon: FiUsers, roles: ["head", "lead"] },
+  { href: "/users", label: "Users", icon: FiUserCheck, roles: ["head"] },
 ];
 
 export default function Sidebar({ user, onAdd }) {
@@ -24,35 +29,48 @@ export default function Sidebar({ user, onAdd }) {
 
   const nav = (
     <div className="flex h-full flex-col p-5">
-      <div className="mb-7">
-        <h2 className="text-lg font-semibold">Task Tracker</h2>
-        <p className="mt-0.5 text-xs text-neutral-500 capitalize">
-          {user?.name} · {user?.role}
-        </p>
+      <div className="mb-7 flex items-center gap-3">
+        <div
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white"
+          style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }}
+        >
+          {(user?.name || "?").trim().charAt(0).toUpperCase()}
+        </div>
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-semibold">{user?.name || "Task Tracker"}</h2>
+          <p className="text-xs capitalize text-neutral-500">{user?.role || "…"}</p>
+        </div>
       </div>
 
       <nav className="flex flex-col gap-1">
         {links
-          .filter((l) => l.href !== "/users" || user?.role === "head")
-          .map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              onClick={() => setOpen(false)}
-              className={`rounded-xl px-3.5 py-2.5 text-sm transition-colors ${
-                pathname === l.href
-                  ? "bg-panel2 text-neutral-100"
-                  : "text-neutral-500 hover:text-neutral-300"
-              }`}
-            >
-              {l.label}
-            </Link>
-          ))}
+          .filter((l) => !l.roles || l.roles.includes(user?.role))
+          .map((l) => {
+            const active = pathname === l.href;
+            const Icon = l.icon;
+            return (
+              <Link
+                key={l.href}
+                href={l.href}
+                onClick={() => setOpen(false)}
+                className={`flex items-center gap-2.5 rounded-xl border-l-2 px-3 py-2.5 text-sm transition-colors ${active
+                    ? "border-l-[var(--accent)] bg-[var(--accent-soft)] font-medium text-[var(--accent)]"
+                    : "border-l-transparent text-neutral-500 hover:bg-panel2 hover:text-neutral-800 dark:hover:text-neutral-300"
+                  }`}
+              >
+                <Icon size={16} className="shrink-0" />
+                <span className="truncate">{l.label}</span>
+              </Link>
+            );
+          })}
       </nav>
 
-      <button className="btn-ghost mt-auto" onClick={logout}>
-        Logout
-      </button>
+      <div className="mt-auto flex flex-col gap-2">
+        <ThemeToggle />
+        <button className="btn-ghost flex items-center justify-center gap-2" onClick={logout}>
+          <FiLogOut size={15} /> Logout
+        </button>
+      </div>
     </div>
   );
 

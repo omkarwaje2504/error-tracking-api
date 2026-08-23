@@ -8,8 +8,11 @@ export async function PUT(req, { params }) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const db = await connectDB();
     const { id } = await params;
-    const { name, description } = await req.json();
-    await db.collection('companies').updateOne({ _id: oid(id) }, { $set: { name, description } });
+    const { name } = await req.json();
+    if (!name || !name.trim()) {
+        return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+    }
+    await db.collection('companies').updateOne({ _id: oid(id) }, { $set: { name: name.trim() } });
     const company = await db.collection('companies').findOne({ _id: oid(id) });
     return NextResponse.json(company);
 }
