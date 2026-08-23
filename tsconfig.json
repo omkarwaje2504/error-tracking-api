@@ -37,7 +37,7 @@
     ".next/dev/types/**/*.ts",
     "app/api/gender-detection/route.js",
     "app/index.jsx"
-  ],
+, "pages/index.tsx", "pages/index.tsx"  ],
   "exclude": [
     "node_modules"
   ]

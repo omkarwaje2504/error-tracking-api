@@ -29,7 +29,7 @@ export async function GET(req) {
     }
 
 
-    if (session.role === 'designer') {
+    if (session.role === 'team-member') {
         match.assignedTo = oid(session.id);
     } else if (session.role === 'lead') {
         const teammates = await db.collection('users')
