@@ -9,7 +9,7 @@ import EmptyState from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
 import { confirmDialog } from '@/lib/confirm';
-import { PRIORITY_META, PRIORITY_ORDER, priorityMeta, isOverdue, formatDate } from '@/lib/taskDisplay';
+import { PRIORITY_META, PRIORITY_ORDER, priorityMeta, isOverdue, formatDate, pointsFor } from '@/lib/taskDisplay';
 
 function TasksInner() {
     const router = useRouter();
@@ -250,12 +250,17 @@ function TasksInner() {
                                 </td>
                                 <td className="px-4 py-3 text-neutral-500">{t.createdBy?.name || '—'}</td>
                                 <td className="px-4 py-3">
-                                    <span className={`rounded-full px-2.5 py-1 text-xs ${t.status === 'completed'
-                                        ? 'bg-green-500/15 text-green-400'
-                                        : 'bg-neutral-500/15 text-neutral-500'
-                                        }`}>
-                                        {t.status}
-                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                        <span className={`rounded-full px-2.5 py-1 text-xs ${t.status === 'completed'
+                                            ? 'bg-green-500/15 text-green-400'
+                                            : 'bg-neutral-500/15 text-neutral-500'
+                                            }`}>
+                                            {t.status}
+                                        </span>
+                                        {t.status === 'completed' && (
+                                            <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">+{pointsFor(t)} pts</span>
+                                        )}
+                                    </div>
                                 </td>
                                 <td className="px-4 py-3">
                                     <div className="flex justify-end gap-2">

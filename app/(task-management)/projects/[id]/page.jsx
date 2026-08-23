@@ -4,22 +4,14 @@ import { useParams, useRouter } from 'next/navigation';
 import Shell from '@/components/Shell';
 import FileButton from '@/components/FileButton';
 import ProgressModal from '@/components/ProgressModal';
+import SubtaskModal from '@/components/SubtaskModal';
+import ProductTypePicker from '@/components/ProductTypePicker';
 import { CardSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
 import { confirmDialog } from '@/lib/confirm';
-import { PRIORITY_META, priorityMeta, isOverdue, formatDate } from '@/lib/taskDisplay';
+import { PRIORITY_META, priorityMeta, isOverdue, formatDate, pointsFor } from '@/lib/taskDisplay';
 
 const STATUS_OPTIONS = ['active', 'on-hold', 'completed', 'cancelled'];
-const TYPE_OPTIONS = [
-    { key: 'e-video', label: 'E-Video' },
-    { key: 'ai-video', label: 'AI-Video' },
-    { key: 'poster', label: 'Poster' },
-    { key: 'frame', label: 'Frame' },
-    { key: 'app', label: 'App' },
-    { key: 'pledge', label: 'Pledge' },
-    { key: 'creative', label: 'Creative' },
-    { key: 'other', label: 'Other' },
-];
 
 const STAGE_LABELS = {
     kickoff: 'Kickoff Meeting',
@@ -79,6 +71,7 @@ export default function ProjectDirectory() {
     const [newStageType, setNewStageType] = useState('kickoff');
     const [dirty, setDirty] = useState(false);
     const [progressTask, setProgressTask] = useState(null);
+    const [subtaskParent, setSubtaskParent] = useState(null);
 
     useEffect(() => { load(); }, [id]);
 
@@ -254,8 +247,8 @@ export default function ProjectDirectory() {
     }
 
     const unlinkedTasks = projectTasks.filter((t) => !t.stageType);
-    const pendingTasks = projectTasks.filter((t) => t.status !== 'completed').length;
-    const doneTasks = projectTasks.filter((t) => t.status === 'completed').length;
+    const unlinkedPending = unlinkedTasks.filter((t) => t.status !== 'completed').length;
+    const unlinkedDone = unlinkedTasks.filter((t) => t.status === 'completed').length;
 
     return (
         <Shell user={user}>
@@ -263,6 +256,13 @@ export default function ProjectDirectory() {
                 task={progressTask}
                 open={!!progressTask}
                 onClose={() => setProgressTask(null)}
+                onChange={loadTasks}
+            />
+            <SubtaskModal
+                task={subtaskParent}
+                users={users}
+                open={!!subtaskParent}
+                onClose={() => setSubtaskParent(null)}
                 onChange={loadTasks}
             />
 
@@ -355,11 +355,8 @@ export default function ProjectDirectory() {
                     </select>
                 </div>
                 <div>
-                    <label className="label">Project type</label>
-                    <select className="input" value={form.projectType} onChange={(e) => set('projectType', e.target.value)}>
-                        <option value="">None</option>
-                        {TYPE_OPTIONS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-                    </select>
+                    <label className="label">Product type</label>
+                    <ProductTypePicker value={form.projectType} onChange={(v) => set('projectType', v)} />
                 </div>
                 <div>
                     <label className="label">Created at</label>
@@ -413,18 +410,6 @@ export default function ProjectDirectory() {
                 )}
             </div>
 
-            {/* Unlinked / anonymous tasks under this project */}
-            <div className="card mb-8 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                    <p className="font-medium">Tasks</p>
-                    <p className="text-sm text-neutral-500">
-                        {pendingTasks} active · {doneTasks} completed
-                        {unlinkedTasks.length > 0 && ` · ${unlinkedTasks.length} not linked to a stage`}
-                    </p>
-                </div>
-                <button className="btn-ghost" onClick={() => router.push(`/tasks?project=${id}`)}>Manage all tasks →</button>
-            </div>
-
             {form.sections.length === 0 && (
                 <div className="card mb-8 text-center">
                     <p className="text-neutral-500">Nothing here yet — add the first action below to start the project's journey.</p>
@@ -454,13 +439,14 @@ export default function ProjectDirectory() {
                             <StageTaskBoard
                                 projectId={id} stageType="design" sectionId={s.id} users={users}
                                 tasks={projectTasks} onChanged={loadTasks} openProgress={setProgressTask}
+                                openSubtasks={setSubtaskParent}
                                 uploadFiles={uploadFiles} addLabel="+ Add design details…"
                             />
                         )}
                         {s.type === 'development' && (
                             <DevelopmentStage
                                 projectId={id} section={s} users={users} tasks={projectTasks}
-                                onChanged={loadTasks} openProgress={setProgressTask}
+                                onChanged={loadTasks} openProgress={setProgressTask} openSubtasks={setSubtaskParent}
                                 uploadFiles={uploadFiles} updateStageData={updateStageData}
                             />
                         )}
@@ -481,6 +467,19 @@ export default function ProjectDirectory() {
                     {Object.entries(STAGE_LABELS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
                 </select>
                 <button className="btn-ghost" onClick={() => addStage(newStageType)}>Add</button>
+            </div>
+
+            {/* Other tasks — not linked to any stage (global-style, but scoped to this project) */}
+            <h2 className="mb-3 text-xl font-semibold">Other tasks</h2>
+            <p className="mb-3 -mt-2 text-sm text-neutral-500">
+                Not part of any stage — {unlinkedPending} active · {unlinkedDone} completed
+            </p>
+            <div className="card mb-8">
+                <StageTaskBoard
+                    projectId={id} stageType={null} sectionId={null} users={users}
+                    tasks={projectTasks} onChanged={loadTasks} openProgress={setProgressTask}
+                    openSubtasks={setSubtaskParent} uploadFiles={uploadFiles} addLabel="+ Add task…"
+                />
             </div>
 
             {/* Discussions */}
@@ -610,7 +609,7 @@ function TaskAddForm({ users, onSubmit, onCancel, saving, uploadFiles, submitLab
     );
 }
 
-function StageTaskRow({ task, onToggle, onDelete, openProgress }) {
+function StageTaskRow({ task, onToggle, onDelete, openProgress, openSubtasks }) {
     return (
         <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-line px-3 py-2.5">
             <input
@@ -627,7 +626,13 @@ function StageTaskRow({ task, onToggle, onDelete, openProgress }) {
                     {task.attachments?.length > 0 && ` · ${task.attachments.length} file${task.attachments.length === 1 ? '' : 's'}`}
                 </p>
             </div>
+            {task.status === 'completed' && (
+                <span className="shrink-0 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">+{pointsFor(task)} pts</span>
+            )}
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] ${priorityMeta(task.priority).className}`}>{priorityMeta(task.priority).label}</span>
+            <button className="btn-ghost shrink-0 !px-2.5 !py-1 !text-xs" onClick={() => openSubtasks(task)}>
+                Subtasks{task.subCount?.total ? ` (${task.subCount.done}/${task.subCount.total})` : ''}
+            </button>
             {task.trackProgress && (
                 <button className="btn-ghost shrink-0 !px-2.5 !py-1 !text-xs" onClick={() => openProgress(task)}>
                     {task.progress?.completed || 0}{task.target ? `/${task.target}` : ''} {task.unit || ''}
@@ -638,7 +643,7 @@ function StageTaskRow({ task, onToggle, onDelete, openProgress }) {
     );
 }
 
-function StageTaskBoard({ projectId, stageType, sectionId, users, tasks, onChanged, openProgress, uploadFiles, addLabel }) {
+function StageTaskBoard({ projectId, stageType, sectionId, users, tasks, onChanged, openProgress, openSubtasks, uploadFiles, addLabel }) {
     const [adding, setAdding] = useState(false);
     const [saving, setSaving] = useState(false);
 
@@ -692,7 +697,7 @@ function StageTaskBoard({ projectId, stageType, sectionId, users, tasks, onChang
             {sorted.length > 0 && (
                 <div className="mb-3 space-y-1.5">
                     {sorted.map((t) => (
-                        <StageTaskRow key={t._id} task={t} onToggle={toggle} onDelete={del} openProgress={openProgress} />
+                        <StageTaskRow key={t._id} task={t} onToggle={toggle} onDelete={del} openProgress={openProgress} openSubtasks={openSubtasks} />
                     ))}
                 </div>
             )}
@@ -709,7 +714,7 @@ function StageTaskBoard({ projectId, stageType, sectionId, users, tasks, onChang
     );
 }
 
-function DevelopmentStage({ projectId, section, users, tasks, onChanged, openProgress, uploadFiles, updateStageData }) {
+function DevelopmentStage({ projectId, section, users, tasks, onChanged, openProgress, openSubtasks, uploadFiles, updateStageData }) {
     const { attachments } = section.data;
     return (
         <>
@@ -736,7 +741,7 @@ function DevelopmentStage({ projectId, section, users, tasks, onChanged, openPro
             <label className="label">Task list</label>
             <StageTaskBoard
                 projectId={projectId} stageType="development" sectionId={section.id} users={users}
-                tasks={tasks} onChanged={onChanged} openProgress={openProgress}
+                tasks={tasks} onChanged={onChanged} openProgress={openProgress} openSubtasks={openSubtasks}
                 uploadFiles={uploadFiles} addLabel="+ Add new task…"
             />
         </>

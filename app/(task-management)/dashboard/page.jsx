@@ -3,10 +3,11 @@ import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Shell from '@/components/Shell';
 import ProgressModal from '@/components/ProgressModal';
+import DailyReportModal from '@/components/DailyReportModal';
 import EmptyState from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
-import { priorityMeta, isOverdue, formatDate } from '@/lib/taskDisplay';
+import { priorityMeta, isOverdue, formatDate, pointsFor } from '@/lib/taskDisplay';
 
 export default function Dashboard() {
     const router = useRouter();
@@ -23,6 +24,7 @@ export default function Dashboard() {
     const [sort, setSort] = useState({ key: 'createdAt', dir: 'desc' });
 
     const [progressTask, setProgressTask] = useState(null);
+    const [reportOpen, setReportOpen] = useState(false);
 
     useEffect(() => { load(); }, []);
 
@@ -110,11 +112,14 @@ export default function Dashboard() {
                     <h1 className="text-2xl font-semibold sm:text-3xl">Dashboard</h1>
                     <p className="mt-1 text-neutral-500 capitalize">My tasks · {user?.role}</p>
                 </div>
-                {isManager && (
-                    <button className="btn-primary" onClick={() => router.push('/team')}>
-                        Team Structure
-                    </button>
-                )}
+                <div className="flex gap-2">
+                    <button className="btn-ghost" onClick={() => setReportOpen(true)}>📧 Daily Report</button>
+                    {isManager && (
+                        <button className="btn-primary" onClick={() => router.push('/team')}>
+                            Team Structure
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* Stats */}
@@ -228,10 +233,15 @@ export default function Dashboard() {
                                 </td>
 
                                 <td className="px-4 py-3">
-                                    <span className={`rounded-full px-2.5 py-1 text-xs ${t.status === 'completed' ? 'bg-green-500/15 text-green-400' : 'bg-neutral-500/15 text-neutral-500'
-                                        }`}>
-                                        {t.status}
-                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                        <span className={`rounded-full px-2.5 py-1 text-xs ${t.status === 'completed' ? 'bg-green-500/15 text-green-400' : 'bg-neutral-500/15 text-neutral-500'
+                                            }`}>
+                                            {t.status}
+                                        </span>
+                                        {t.status === 'completed' && (
+                                            <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">+{pointsFor(t)} pts</span>
+                                        )}
+                                    </div>
                                 </td>
 
                                 <td className="px-4 py-3">
@@ -260,6 +270,7 @@ export default function Dashboard() {
                 onClose={() => setProgressTask(null)}
                 onChange={load}
             />
+            <DailyReportModal open={reportOpen} onClose={() => setReportOpen(false)} />
         </Shell>
     );
 }

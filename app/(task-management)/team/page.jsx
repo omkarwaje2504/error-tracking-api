@@ -5,15 +5,12 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import Shell from '@/components/Shell';
 import EmptyState from '@/components/EmptyState';
 import { CardSkeleton } from '@/components/Skeleton';
-import { isOverdue } from '@/lib/taskDisplay';
+import { isOverdue, pointsFor } from '@/lib/taskDisplay';
 
 const TEAMS = ['graphic', 'video', 'frontend', 'backend', 'app'];
-const PRIORITY_BONUS = { low: 0, medium: 2, high: 5, urgent: 8 };
 const MEDALS = ['🥇', '🥈', '🥉'];
 
 function dayKey(d) { return new Date(d).toISOString().slice(0, 10); }
-
-function pointsFor(t) { return 10 + (PRIORITY_BONUS[t.priority] ?? 2); }
 
 function computeStreak(days) {
     const cursor = new Date();

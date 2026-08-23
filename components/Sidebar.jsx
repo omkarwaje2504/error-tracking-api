@@ -3,7 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  FiCompass, FiHome, FiBriefcase, FiFolder, FiCheckSquare, FiUsers, FiUserCheck, FiLogOut,
+  FiCompass, FiHome, FiBriefcase, FiFolder, FiCheckSquare, FiUsers, FiUserCheck, FiTag, FiLogOut,
 } from "react-icons/fi";
 import ThemeToggle from "./ThemeToggle";
 
@@ -12,6 +12,7 @@ const links = [
   { href: "/dashboard", label: "Dashboard", icon: FiHome },
   { href: "/companies", label: "Companies", icon: FiBriefcase },
   { href: "/projects", label: "Projects", icon: FiFolder },
+  { href: "/products", label: "Product Types", icon: FiTag },
   { href: "/tasks", label: "Tasks", icon: FiCheckSquare },
   { href: "/team", label: "Team Structure", icon: FiUsers, roles: ["head", "lead"] },
   { href: "/users", label: "Users", icon: FiUserCheck, roles: ["head"] },

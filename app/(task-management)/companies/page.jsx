@@ -7,6 +7,7 @@ import EmptyState from '@/components/EmptyState';
 import { CardSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
 import { confirmDialog } from '@/lib/confirm';
+import { colorFor } from '@/lib/colors';
 
 export default function CompaniesAndBrands() {
     const router = useRouter();
@@ -128,10 +129,17 @@ export default function CompaniesAndBrands() {
 
     function CompanyCard({ company }) {
         const list = brandsByCompany[company._id] || [];
+        const c = colorFor(company.name);
         return (
-            <div className="card flex flex-col !p-0">
-                <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3.5">
-                    <p className="min-w-0 truncate font-semibold">{company.name}</p>
+            <div className="card relative flex flex-col overflow-hidden !p-0">
+                <div className={`absolute inset-x-0 top-0 h-1.5 ${c.bar}`} />
+                <div className="flex items-center justify-between gap-2 border-b border-line px-4 pb-3.5 pt-4">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${c.bg} ${c.text}`}>
+                            {company.name.trim().charAt(0).toUpperCase()}
+                        </div>
+                        <p className="min-w-0 truncate font-semibold">{company.name}</p>
+                    </div>
                     <div className="flex shrink-0 gap-1">
                         <button className="rounded-lg p-1.5 text-neutral-500 hover:bg-panel2 hover:text-neutral-800 dark:hover:text-neutral-200" title="Rename" onClick={() => openEditCompany(company)}>
                             ✎
@@ -145,17 +153,21 @@ export default function CompaniesAndBrands() {
                     {list.length === 0 ? (
                         <p className="px-1 py-2 text-sm text-neutral-500">No brands yet.</p>
                     ) : (
-                        list.map((b) => (
-                            <div key={b._id} className="group flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm hover:bg-panel2/60">
-                                <button className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => router.push(`/projects?brand=${b._id}`)}>
-                                    {b.name}
-                                </button>
-                                <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                                    <button className="rounded-md px-1.5 py-0.5 text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200" onClick={() => openEditBrand(b)}>✎</button>
-                                    <button className="rounded-md px-1.5 py-0.5 text-xs text-neutral-500 hover:text-red-400" onClick={() => removeBrand(b)}>✕</button>
+                        list.map((b) => {
+                            const bc = colorFor(b.name);
+                            return (
+                                <div key={b._id} className="group flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm hover:bg-panel2/60">
+                                    <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => router.push(`/projects?brand=${b._id}`)}>
+                                        <span className={`h-2 w-2 shrink-0 rounded-full ${bc.bar}`} />
+                                        <span className="min-w-0 truncate font-medium hover:underline">{b.name}</span>
+                                    </button>
+                                    <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                                        <button className="rounded-md px-1.5 py-0.5 text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200" onClick={() => openEditBrand(b)}>✎</button>
+                                        <button className="rounded-md px-1.5 py-0.5 text-xs text-neutral-500 hover:text-red-400" onClick={() => removeBrand(b)}>✕</button>
+                                    </div>
                                 </div>
-                            </div>
-                        ))
+                            );
+                        })
                     )}
                 </div>
                 <div className="border-t border-line p-3">
