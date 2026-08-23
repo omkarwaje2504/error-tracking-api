@@ -1,14 +1,14 @@
-import { GetServerSideProps } from "next";
-
-export default function Home() {
-  return null;
-}
+import type { GetServerSideProps } from 'next';
 
 export const getServerSideProps: GetServerSideProps = async () => {
   return {
     redirect: {
-      destination: "/dashboard",
+      destination: '/login',
       permanent: false,
     },
   };
 };
+
+export default function Home() {
+  return null;
+}
