@@ -52,6 +52,7 @@ export async function PUT(req, { params }) {
     if (body.deadline !== undefined) set.deadline = body.deadline || null;
     if (body.link !== undefined) set.link = body.link;
     if (body.status !== undefined) set.status = body.status;
+    if (body.pinned !== undefined) set.pinned = !!body.pinned;
     if (body.attachments !== undefined) set.attachments = body.attachments;
     if (body.sections !== undefined) set.sections = body.sections;
     if (body.kickoff !== undefined) set.kickoff = body.kickoff;

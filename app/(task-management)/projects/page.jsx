@@ -50,8 +50,9 @@ function ProjectsInner() {
     const [status, setStatus] = useState('active');
     const [companyFilter, setCompanyFilter] = useState('');
     const [brandFilter, setBrandFilter] = useState(brandFilterParam || '');
+    const [productTypeFilter, setProductTypeFilter] = useState('');
 
-    useEffect(() => { load(); }, [status, companyFilter, brandFilter, hiddenTypes]);
+    useEffect(() => { load(); }, [status, companyFilter, brandFilter, productTypeFilter, hiddenTypes]);
 
     useEffect(() => {
         localStorage.setItem('projects:hiddenTypes', JSON.stringify(hiddenTypes));
@@ -62,7 +63,8 @@ function ProjectsInner() {
         if (status) p.set('status', status);
         if (companyFilter) p.set('company', companyFilter);
         if (brandFilter) p.set('brand', brandFilter);
-        if (hiddenTypes.length) p.set('excludeTypes', hiddenTypes.join(','));
+        if (productTypeFilter) p.set('productType', productTypeFilter);
+        else if (hiddenTypes.length) p.set('excludeTypes', hiddenTypes.join(','));
         p.set('page', String(page));
         p.set('limit', String(PAGE_SIZE));
         return p;
@@ -70,6 +72,29 @@ function ProjectsInner() {
 
     function toggleType(name) {
         setHiddenTypes((h) => (h.includes(name) ? h.filter((t) => t !== name) : [...h, name]));
+    }
+
+    // Picking a specific type to show would otherwise silently conflict
+    // with that same type being in the hidden list.
+    function selectProductType(name) {
+        setProductTypeFilter(name);
+        if (name) setHiddenTypes((h) => h.filter((t) => t !== name));
+    }
+
+    async function togglePin(e, p) {
+        e.stopPropagation(); // don't navigate into the project row
+        const pinned = !p.pinned;
+        setProjects((list) => list
+            .map((x) => (x._id === p._id ? { ...x, pinned } : x))
+            .sort((a, b) => (b.pinned === true) - (a.pinned === true)));
+        const res = await fetch(`/api/projects/${p._id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pinned }),
+        });
+        if (!res.ok) {
+            toast.error('Failed to update pin.');
+            load();
+        }
     }
 
     async function load() {
@@ -143,7 +168,7 @@ function ProjectsInner() {
         [productTypes]
     );
 
-    const hasFilters = status !== 'active' || companyFilter || brandFilter || q || hiddenTypes.length > 0;
+    const hasFilters = status !== 'active' || companyFilter || brandFilter || productTypeFilter || q || hiddenTypes.length > 0;
 
     return (
         <Shell user={user} onAdd={openNew}>
@@ -176,8 +201,12 @@ function ProjectsInner() {
                     <option value="">All brands</option>
                     {filteredBrands.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
                 </select>
+                <select className="input w-auto" value={productTypeFilter} onChange={(e) => selectProductType(e.target.value)}>
+                    <option value="">All product types</option>
+                    {productTypes.map((t) => <option key={t._id} value={t.name}>{t.name}</option>)}
+                </select>
                 {hasFilters && (
-                    <button className="btn-ghost" onClick={() => { setStatus('active'); setCompanyFilter(''); setBrandFilter(''); setQ(''); setHiddenTypes([]); }}>
+                    <button className="btn-ghost" onClick={() => { setStatus('active'); setCompanyFilter(''); setBrandFilter(''); setProductTypeFilter(''); setQ(''); setHiddenTypes([]); }}>
                         Clear
                     </button>
                 )}
@@ -210,7 +239,7 @@ function ProjectsInner() {
 
             <div className="card overflow-x-auto !p-0">
                 {loading ? (
-                    <TableSkeleton rows={5} cols={5} />
+                    <TableSkeleton rows={5} cols={6} />
                 ) : rows.length === 0 ? (
                     <EmptyState
                         icon="📁"
@@ -223,6 +252,7 @@ function ProjectsInner() {
                     <table className="w-full min-w-[640px] text-sm">
                         <thead>
                             <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-neutral-500">
+                                <th className="w-8 px-2 py-3 font-medium" aria-hidden />
                                 <th className="px-4 py-3 font-medium">Name</th>
                                 <th className="px-4 py-3 font-medium">Type</th>
                                 <th className="px-4 py-3 font-medium">Division</th>
@@ -238,6 +268,16 @@ function ProjectsInner() {
                                     className="cursor-pointer border-b border-line/60 last:border-0 hover:bg-panel2/40"
                                     onClick={() => router.push(`/projects/${p._id}`)}
                                 >
+                                    <td className="w-8 px-2 py-3 text-center">
+                                        <button
+                                            type="button"
+                                            onClick={(e) => togglePin(e, p)}
+                                            title={p.pinned ? 'Unpin' : 'Pin to top'}
+                                            className={`text-base leading-none transition ${p.pinned ? 'text-amber-400' : 'text-neutral-300 hover:text-neutral-400 dark:text-neutral-600 dark:hover:text-neutral-500'}`}
+                                        >
+                                            {p.pinned ? '★' : '☆'}
+                                        </button>
+                                    </td>
                                     <td className="px-4 py-3 font-medium text-neutral-900 dark:text-neutral-100">
                                         {p.name}
                                     </td>

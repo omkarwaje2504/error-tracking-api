@@ -3,7 +3,7 @@ import { getSession } from '@/lib/auth';
 import { getR2Client, r2Configured, R2_BUCKET, R2_PUBLIC_URL } from '@/lib/r2';
 import { NextResponse } from 'next/server';
 
-const MAX_SIZE = 25 * 1024 * 1024; // 25MB
+const MAX_SIZE = 225 * 1024 * 1024; // 25MB
 
 export async function POST(req) {
     const session = await getSession();
@@ -24,7 +24,7 @@ export async function POST(req) {
     for (const file of files) {
         if (typeof file === 'string') continue;
         if (file.size > MAX_SIZE) {
-            return NextResponse.json({ error: `${file.name} is larger than 25MB` }, { status: 400 });
+            return NextResponse.json({ error: `${file.name} is larger than 225MB` }, { status: 400 });
         }
         const buffer = Buffer.from(await file.arrayBuffer());
         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');

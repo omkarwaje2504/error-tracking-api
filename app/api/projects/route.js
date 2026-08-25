@@ -15,6 +15,8 @@ export async function GET(req) {
     const brandId = params.get('brand');
     const companyId = params.get('company');
     const statusFilter = params.get('status'); // 'active' | 'completed' | 'all'
+    // Show only this one product type — takes priority over excludeTypes.
+    const productTypeParam = params.get('productType');
     // Comma-separated product type names to hide, e.g. "Rx-pad,Poster". An
     // empty-string entry (from a trailing/leading comma) means "no type set".
     const excludeTypesParam = params.get('excludeTypes');
@@ -25,7 +27,9 @@ export async function GET(req) {
     if (brandId) match.brand = oid(brandId);
     if (statusFilter === 'active') match.status = { $ne: 'completed' };
     else if (statusFilter === 'completed') match.status = 'completed';
-    if (excludeTypesParam) {
+    if (productTypeParam) {
+        match.projectType = productTypeParam;
+    } else if (excludeTypesParam) {
         const excludeTypes = excludeTypesParam.split(',');
         // Projects created before `projectType` existed have the field
         // missing rather than ''  — $nin treats missing/null as excludable
@@ -45,7 +49,7 @@ export async function GET(req) {
 
     const projects = await db.collection('projects').aggregate([
         { $match: match },
-        { $sort: { createdAt: -1 } },
+        { $sort: { pinned: -1, createdAt: -1 } },
         ...(limit ? [{ $skip: ((page || 1) - 1) * limit }, { $limit: limit }] : []),
         { $lookup: { from: 'brands', localField: 'brand', foreignField: '_id', as: 'brand' } },
         { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
@@ -64,7 +68,7 @@ export async function GET(req) {
         {
             $project: {
                 name: 1, description: 1, createdAt: 1, updatedAt: 1, deadline: 1, status: 1, link: 1,
-                client: 1, projectType: 1,
+                client: 1, projectType: 1, pinned: 1,
                 'brand._id': 1, 'brand.name': 1, 'brand.company.name': 1,
                 'company._id': 1, 'company.name': 1,
                 'salesPerson._id': 1, 'salesPerson.name': 1,
@@ -103,6 +107,7 @@ export async function POST(req) {
         deadline: deadline || null,
         link: link || '',
         status: status || 'active',
+        pinned: false,
         attachments: [],
         sections: [],
         createdBy: oid(session.id),

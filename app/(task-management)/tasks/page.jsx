@@ -11,7 +11,23 @@ import { toast } from '@/lib/toast';
 import { confirmDialog } from '@/lib/confirm';
 import { getSession } from '@/lib/session';
 import { getReference } from '@/lib/referenceCache';
+import { colorFor } from '@/lib/colors';
 import { PRIORITY_META, PRIORITY_ORDER, priorityMeta, isOverdue, formatDate, pointsFor, DEPARTMENTS, departmentLabel } from '@/lib/taskDisplay';
+
+// Empty string stands for "no product type set" on the task's project —
+// kept in the hidden-types list the same way the API's excludeProductTypes
+// param expects it. Mirrors the same pattern on the Projects list page.
+const NO_TYPE = '';
+
+function loadHiddenProductTypes() {
+    if (typeof window === 'undefined') return [];
+    try {
+        const raw = JSON.parse(localStorage.getItem('tasks:hiddenProductTypes') || '[]');
+        return Array.isArray(raw) ? raw : [];
+    } catch {
+        return [];
+    }
+}
 
 function TasksInner() {
     const router = useRouter();
@@ -22,6 +38,9 @@ function TasksInner() {
     const [tasks, setTasks] = useState([]);
     const [projects, setProjects] = useState([]);
     const [users, setUsers] = useState([]);
+    const [productTypes, setProductTypes] = useState([]);
+    // Hidden product types persist across visits, same as on Projects.
+    const [hiddenProductTypes, setHiddenProductTypes] = useState(loadHiddenProductTypes);
     const [open, setOpen] = useState(false);
     const [edit, setEdit] = useState(null);
     const [form, setForm] = useState({
@@ -41,8 +60,16 @@ function TasksInner() {
     const [assignee, setAssignee] = useState(params.get('assignee') || '');
     const [status, setStatus] = useState('active');
     const [priority, setPriority] = useState('');
+    const [department, setDepartment] = useState('');
+    const [productTypeFilter, setProductTypeFilter] = useState('');
 
-    useEffect(() => { load(); }, [projectFilter, assignee, status, priority]);
+    useEffect(() => {
+        load();
+    }, [projectFilter, assignee, status, priority, department, productTypeFilter, hiddenProductTypes]);
+
+    useEffect(() => {
+        localStorage.setItem('tasks:hiddenProductTypes', JSON.stringify(hiddenProductTypes));
+    }, [hiddenProductTypes]);
 
     function buildQuery(page) {
         const p = new URLSearchParams();
@@ -50,9 +77,21 @@ function TasksInner() {
         if (assignee) p.set('assignee', assignee);
         if (status) p.set('status', status);
         if (priority) p.set('priority', priority);
+        if (department) p.set('department', department);
+        if (productTypeFilter) p.set('productType', productTypeFilter);
+        else if (hiddenProductTypes.length) p.set('excludeProductTypes', hiddenProductTypes.join(','));
         p.set('page', String(page));
         p.set('limit', String(PAGE_SIZE));
         return p;
+    }
+
+    function toggleProductType(name) {
+        setHiddenProductTypes((h) => (h.includes(name) ? h.filter((t) => t !== name) : [...h, name]));
+    }
+
+    function selectProductType(name) {
+        setProductTypeFilter(name);
+        if (name) setHiddenProductTypes((h) => h.filter((t) => t !== name));
     }
 
     async function load() {
@@ -66,6 +105,7 @@ function TasksInner() {
         setTotal(data.total);
         setProjects(await (await fetch('/api/projects')).json());
         setUsers(await getReference('users'));
+        setProductTypes(await getReference('productTypes'));
         setLoading(false);
     }
 
@@ -140,6 +180,11 @@ function TasksInner() {
         });
     }
 
+    const typeOptions = useMemo(
+        () => [{ _id: '__no-type__', name: 'No type', key: NO_TYPE }, ...productTypes.map((t) => ({ ...t, key: t.name }))],
+        [productTypes]
+    );
+
     // Status/priority/assignee are already applied server-side — this just orders the current page.
     const rows = useMemo(() => {
         return [...tasks].sort((a, b) => {
@@ -186,12 +231,51 @@ function TasksInner() {
                     <option value="">All priorities</option>
                     {Object.entries(PRIORITY_META).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
                 </select>
-                {(status !== 'active' || assignee || priority) && (
-                    <button className="btn-ghost" onClick={() => { setStatus('active'); setAssignee(''); setPriority(''); }}>
+                <select className="input w-auto" value={department} onChange={(e) => setDepartment(e.target.value)}>
+                    <option value="">All departments</option>
+                    {DEPARTMENTS.map((d) => <option key={d} value={d}>{departmentLabel(d)}</option>)}
+                </select>
+                <select className="input w-auto" value={productTypeFilter} onChange={(e) => selectProductType(e.target.value)}>
+                    <option value="">All product types</option>
+                    {productTypes.map((t) => <option key={t._id} value={t.name}>{t.name}</option>)}
+                </select>
+                {(status !== 'active' || assignee || priority || department || productTypeFilter || hiddenProductTypes.length > 0) && (
+                    <button
+                        className="btn-ghost"
+                        onClick={() => {
+                            setStatus('active'); setAssignee(''); setPriority('');
+                            setDepartment(''); setProductTypeFilter(''); setHiddenProductTypes([]);
+                        }}
+                    >
                         Clear
                     </button>
                 )}
             </div>
+
+            {typeOptions.length > 1 && (
+                <div className="mb-4 flex flex-wrap items-center gap-1.5">
+                    <span className="mr-1 text-xs font-medium uppercase tracking-wider text-neutral-500">Hide type</span>
+                    {typeOptions.map((t) => {
+                        const hidden = hiddenProductTypes.includes(t.key);
+                        const c = colorFor(t.name);
+                        return (
+                            <button
+                                key={t._id}
+                                type="button"
+                                onClick={() => toggleProductType(t.key)}
+                                title={hidden ? `Show "${t.name}" tasks` : `Hide "${t.name}" tasks`}
+                                className={`rounded-full border px-2.5 py-1 text-xs transition ${
+                                    hidden
+                                        ? 'border-line text-neutral-400 opacity-50 line-through'
+                                        : `border-transparent ${c.bg} ${c.text}`
+                                }`}
+                            >
+                                {t.name}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
 
             <div className="card overflow-x-auto !p-0">
               {loading ? (
@@ -249,7 +333,14 @@ function TasksInner() {
                                         {t.title}
                                     </span>
                                 </td>
-                                <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{t.project?.name || '—'}</td>
+                                <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
+                                    {t.project?.name || '—'}
+                                    {t.project?.projectType && (
+                                        <span className={`ml-1.5 rounded-full px-2 py-0.5 text-[11px] ${colorFor(t.project.projectType).bg} ${colorFor(t.project.projectType).text}`}>
+                                            {t.project.projectType}
+                                        </span>
+                                    )}
+                                </td>
                                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
                                     {t.assignedTo?.map((u) => u.name).join(', ') || 'Unassigned'}
                                 </td>

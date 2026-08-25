@@ -16,12 +16,32 @@ export async function GET(req) {
     const mineOnly = params.get('mine') === 'true';
     const statusFilter = params.get('status'); // 'active' | 'completed' | 'all'
     const priorityFilter = params.get('priority');
+    const departmentFilter = params.get('department');
+    // Product type comes off the task's project, not the task itself — show
+    // only one type, or hide a comma-separated list (mirrors /api/projects).
+    const productTypeParam = params.get('productType');
+    const excludeProductTypesParam = params.get('excludeProductTypes');
     const page = params.get('page') ? Math.max(1, parseInt(params.get('page'), 10) || 1) : null;
     const limit = params.get('limit') ? Math.min(200, Math.max(1, parseInt(params.get('limit'), 10) || 50)) : null;
 
     const match = { deleted: { $ne: true } };
 
-    if (projectId) match.project = oid(projectId);
+    if (departmentFilter) match.department = departmentFilter;
+    if (productTypeParam || excludeProductTypesParam) {
+        const typeMatch = productTypeParam
+            ? { projectType: productTypeParam }
+            : (() => {
+                const excludeTypes = excludeProductTypesParam.split(',');
+                return { projectType: { $nin: excludeTypes.includes('') ? [...excludeTypes, null] : excludeTypes } };
+            })();
+        const eligible = await db.collection('projects')
+            .find({ deleted: { $ne: true }, ...typeMatch }).project({ _id: 1 }).toArray();
+        let ids = eligible.map((p) => p._id);
+        if (projectId) ids = ids.filter((pid) => pid.equals(oid(projectId)));
+        match.project = { $in: ids };
+    } else if (projectId) {
+        match.project = oid(projectId);
+    }
     if (parentId) {
         match.parentTask = oid(parentId);        // subtasks of one task
     } else {
@@ -68,7 +88,7 @@ export async function GET(req) {
                     { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
                     { $lookup: { from: 'companies', localField: 'brand.company', foreignField: '_id', as: 'brand.company' } },
                     { $unwind: { path: '$brand.company', preserveNullAndEmptyArrays: true } },
-                    { $project: { name: 1, 'brand.name': 1, 'brand.company.name': 1 } },
+                    { $project: { name: 1, projectType: 1, 'brand.name': 1, 'brand.company.name': 1 } },
                 ],
             }
         },
@@ -81,7 +101,7 @@ export async function GET(req) {
                 title: 1, description: 1, status: 1, createdAt: 1, completedAt: 1,
                 trackProgress: 1, unit: 1, target: 1, parentTask: 1, department: 1,
                 priority: 1, dueDate: 1, stageType: 1, stageId: 1, attachments: 1,
-                'project._id': 1, 'project.name': 1,
+                'project._id': 1, 'project.name': 1, 'project.projectType': 1,
                 'assignedTo._id': 1, 'assignedTo.name': 1, 'assignedTo.team': 1,
                 'createdBy._id': 1, 'createdBy.name': 1,
             }
