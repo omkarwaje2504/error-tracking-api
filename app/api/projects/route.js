@@ -15,6 +15,9 @@ export async function GET(req) {
     const brandId = params.get('brand');
     const companyId = params.get('company');
     const statusFilter = params.get('status'); // 'active' | 'completed' | 'all'
+    // Comma-separated product type names to hide, e.g. "Rx-pad,Poster". An
+    // empty-string entry (from a trailing/leading comma) means "no type set".
+    const excludeTypesParam = params.get('excludeTypes');
     const page = params.get('page') ? Math.max(1, parseInt(params.get('page'), 10) || 1) : null;
     const limit = params.get('limit') ? Math.min(200, Math.max(1, parseInt(params.get('limit'), 10) || 50)) : null;
 
@@ -22,6 +25,13 @@ export async function GET(req) {
     if (brandId) match.brand = oid(brandId);
     if (statusFilter === 'active') match.status = { $ne: 'completed' };
     else if (statusFilter === 'completed') match.status = 'completed';
+    if (excludeTypesParam) {
+        const excludeTypes = excludeTypesParam.split(',');
+        // Projects created before `projectType` existed have the field
+        // missing rather than ''  — $nin treats missing/null as excludable
+        // too, so hiding "no type" needs `null` alongside the '' sentinel.
+        match.projectType = { $nin: excludeTypes.includes('') ? [...excludeTypes, null] : excludeTypes };
+    }
     if (companyId) {
         const companyBrands = await db.collection('brands')
             .find({ company: oid(companyId), deleted: { $ne: true } }).project({ _id: 1 }).toArray();

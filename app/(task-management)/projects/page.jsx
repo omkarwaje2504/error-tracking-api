@@ -8,6 +8,21 @@ import { TableSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
 import { getSession } from '@/lib/session';
 import { getReference } from '@/lib/referenceCache';
+import { colorFor } from '@/lib/colors';
+
+// Empty string stands for "no product type set" — kept in the hidden-types
+// list the same way the API's `excludeTypes` param expects it.
+const NO_TYPE = '';
+
+function loadHiddenTypes() {
+    if (typeof window === 'undefined') return [];
+    try {
+        const raw = JSON.parse(localStorage.getItem('projects:hiddenTypes') || '[]');
+        return Array.isArray(raw) ? raw : [];
+    } catch {
+        return [];
+    }
+}
 
 function ProjectsInner() {
     const router = useRouter();
@@ -18,6 +33,10 @@ function ProjectsInner() {
     const [projects, setProjects] = useState([]);
     const [brands, setBrands] = useState([]);
     const [companies, setCompanies] = useState([]);
+    const [productTypes, setProductTypes] = useState([]);
+    // Product types the user has toggled off — persisted so "hide Rx-pad"
+    // sticks across visits instead of resetting every load.
+    const [hiddenTypes, setHiddenTypes] = useState(loadHiddenTypes);
     const [loading, setLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     const [total, setTotal] = useState(0);
@@ -32,16 +51,25 @@ function ProjectsInner() {
     const [companyFilter, setCompanyFilter] = useState('');
     const [brandFilter, setBrandFilter] = useState(brandFilterParam || '');
 
-    useEffect(() => { load(); }, [status, companyFilter, brandFilter]);
+    useEffect(() => { load(); }, [status, companyFilter, brandFilter, hiddenTypes]);
+
+    useEffect(() => {
+        localStorage.setItem('projects:hiddenTypes', JSON.stringify(hiddenTypes));
+    }, [hiddenTypes]);
 
     function buildQuery(page) {
         const p = new URLSearchParams();
         if (status) p.set('status', status);
         if (companyFilter) p.set('company', companyFilter);
         if (brandFilter) p.set('brand', brandFilter);
+        if (hiddenTypes.length) p.set('excludeTypes', hiddenTypes.join(','));
         p.set('page', String(page));
         p.set('limit', String(PAGE_SIZE));
         return p;
+    }
+
+    function toggleType(name) {
+        setHiddenTypes((h) => (h.includes(name) ? h.filter((t) => t !== name) : [...h, name]));
     }
 
     async function load() {
@@ -54,6 +82,7 @@ function ProjectsInner() {
         setTotal(data.total);
         setBrands(await getReference('brands'));
         setCompanies(await getReference('companies'));
+        setProductTypes(await getReference('productTypes'));
         setLoading(false);
     }
 
@@ -109,7 +138,12 @@ function ProjectsInner() {
         !q || p.name?.toLowerCase().includes(q.toLowerCase())
     )), [projects, q]);
 
-    const hasFilters = status !== 'active' || companyFilter || brandFilter || q;
+    const typeOptions = useMemo(
+        () => [{ _id: '__no-type__', name: 'No type', key: NO_TYPE }, ...productTypes.map((t) => ({ ...t, key: t.name }))],
+        [productTypes]
+    );
+
+    const hasFilters = status !== 'active' || companyFilter || brandFilter || q || hiddenTypes.length > 0;
 
     return (
         <Shell user={user} onAdd={openNew}>
@@ -143,11 +177,36 @@ function ProjectsInner() {
                     {filteredBrands.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
                 </select>
                 {hasFilters && (
-                    <button className="btn-ghost" onClick={() => { setStatus('active'); setCompanyFilter(''); setBrandFilter(''); setQ(''); }}>
+                    <button className="btn-ghost" onClick={() => { setStatus('active'); setCompanyFilter(''); setBrandFilter(''); setQ(''); setHiddenTypes([]); }}>
                         Clear
                     </button>
                 )}
             </div>
+
+            {typeOptions.length > 1 && (
+                <div className="mb-4 flex flex-wrap items-center gap-1.5">
+                    <span className="mr-1 text-xs font-medium uppercase tracking-wider text-neutral-500">Type</span>
+                    {typeOptions.map((t) => {
+                        const hidden = hiddenTypes.includes(t.key);
+                        const c = colorFor(t.name);
+                        return (
+                            <button
+                                key={t._id}
+                                type="button"
+                                onClick={() => toggleType(t.key)}
+                                title={hidden ? `Show "${t.name}" projects` : `Hide "${t.name}" projects`}
+                                className={`rounded-full border px-2.5 py-1 text-xs transition ${
+                                    hidden
+                                        ? 'border-line text-neutral-400 opacity-50 line-through'
+                                        : `border-transparent ${c.bg} ${c.text}`
+                                }`}
+                            >
+                                {t.name}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
 
             <div className="card overflow-x-auto !p-0">
                 {loading ? (
@@ -165,6 +224,7 @@ function ProjectsInner() {
                         <thead>
                             <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-neutral-500">
                                 <th className="px-4 py-3 font-medium">Name</th>
+                                <th className="px-4 py-3 font-medium">Type</th>
                                 <th className="px-4 py-3 font-medium">Division</th>
                                 <th className="px-4 py-3 font-medium">Company</th>
                                 <th className="px-4 py-3 font-medium">Status</th>
@@ -180,6 +240,13 @@ function ProjectsInner() {
                                 >
                                     <td className="px-4 py-3 font-medium text-neutral-900 dark:text-neutral-100">
                                         {p.name}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        {p.projectType ? (
+                                            <span className={`rounded-full px-2.5 py-1 text-xs ${colorFor(p.projectType).bg} ${colorFor(p.projectType).text}`}>
+                                                {p.projectType}
+                                            </span>
+                                        ) : '—'}
                                     </td>
                                     <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{p.brand?.name || '—'}</td>
                                     <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{p.company?.name || p.brand?.company?.name || '—'}</td>

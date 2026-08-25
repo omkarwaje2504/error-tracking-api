@@ -11,7 +11,7 @@ import { toast } from '@/lib/toast';
 import { confirmDialog } from '@/lib/confirm';
 import { getSession } from '@/lib/session';
 import { getReference } from '@/lib/referenceCache';
-import { PRIORITY_META, PRIORITY_ORDER, priorityMeta, isOverdue, formatDate, pointsFor } from '@/lib/taskDisplay';
+import { PRIORITY_META, PRIORITY_ORDER, priorityMeta, isOverdue, formatDate, pointsFor, DEPARTMENTS, departmentLabel } from '@/lib/taskDisplay';
 
 function TasksInner() {
     const router = useRouter();
@@ -89,6 +89,8 @@ function TasksInner() {
 
     async function save() {
         if (!form.title.trim()) return toast.error('Title is required.');
+        if (!form.project) return toast.error('Every task needs a project.');
+        if (!form.department) return toast.error('Pick a department.');
         setSaving(true);
         try {
             const url = edit ? `/api/tasks/${edit}` : '/api/tasks';
@@ -251,7 +253,7 @@ function TasksInner() {
                                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
                                     {t.assignedTo?.map((u) => u.name).join(', ') || 'Unassigned'}
                                 </td>
-                                <td className="px-4 py-3 text-neutral-500 capitalize">{t.department || '—'}</td>
+                                <td className="px-4 py-3 text-neutral-500">{t.department ? departmentLabel(t.department) : '—'}</td>
                                 <td className="px-4 py-3">
                                     <span className={`rounded-full px-2.5 py-1 text-xs ${priorityMeta(t.priority).className}`}>
                                         {priorityMeta(t.priority).label}
@@ -339,20 +341,17 @@ function TasksInner() {
                 <div className="mb-3.5">
                     <label className="label">Project</label>
                     <select className="input" value={form.project} onChange={(e) => setForm({ ...form, project: e.target.value })}>
-                        <option value="">No project (global task)</option>
+                        <option value="" disabled>Select a project…</option>
                         {projects.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
                     </select>
+                    <p className="mt-1 text-xs text-neutral-500">Every task belongs to a project — pick one above.</p>
                 </div>
                 <div className="mb-3.5 flex gap-3">
                     <div className="flex-1">
                         <label className="label">Department</label>
                         <select className="input" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>
-                            <option value="">None</option>
-                            <option value="graphic">Graphic</option>
-                            <option value="video">Video</option>
-                            <option value="frontend">Frontend</option>
-                            <option value="backend">Backend</option>
-                            <option value="app">App</option>
+                            <option value="" disabled>Select a department…</option>
+                            {DEPARTMENTS.map((d) => <option key={d} value={d}>{departmentLabel(d)}</option>)}
                         </select>
                     </div>
                     <div className="flex-1">

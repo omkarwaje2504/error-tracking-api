@@ -139,6 +139,9 @@ export async function POST(req) {
     if (!title || !title.trim()) {
         return NextResponse.json({ error: 'Title is required' }, { status: 400 });
     }
+    if (!project) {
+        return NextResponse.json({ error: 'Project is required' }, { status: 400 });
+    }
     const now = new Date();
     const doc = {
         title, description,

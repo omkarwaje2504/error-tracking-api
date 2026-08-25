@@ -5,13 +5,14 @@ import Shell from '@/components/Shell';
 import FileButton from '@/components/FileButton';
 import ProgressModal from '@/components/ProgressModal';
 import SubtaskModal from '@/components/SubtaskModal';
+import TaskEditModal from '@/components/TaskEditModal';
 import ProductTypePicker from '@/components/ProductTypePicker';
 import { CardSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
 import { confirmDialog } from '@/lib/confirm';
 import { getSession } from '@/lib/session';
 import { getReference } from '@/lib/referenceCache';
-import { PRIORITY_META, priorityMeta, isOverdue, formatDate, pointsFor } from '@/lib/taskDisplay';
+import { PRIORITY_META, priorityMeta, isOverdue, formatDate, pointsFor, DEPARTMENTS, departmentLabel } from '@/lib/taskDisplay';
 
 const STATUS_OPTIONS = ['active', 'on-hold', 'completed', 'cancelled'];
 
@@ -49,6 +50,17 @@ function stageDefaults(type) {
     }
 }
 
+// Which action a task's department files under. Graphic/video work is
+// design; frontend/backend/app work is development. Kickoff/production/
+// delivery have no department mapping — those stay wherever they're put.
+const DEPT_STAGE_MAP = {
+    graphic: 'design',
+    video: 'design',
+    frontend: 'development',
+    backend: 'development',
+    app: 'development',
+};
+
 const pillClass = (active) =>
     `rounded-full border border-line px-3 py-1.5 text-sm transition-colors ${active ? 'bg-neutral-900 text-white dark:bg-white dark:text-black' : 'bg-panel2 text-neutral-900 dark:text-neutral-100'
     }`;
@@ -74,6 +86,7 @@ export default function ProjectDirectory() {
     const [dirty, setDirty] = useState(false);
     const [progressTask, setProgressTask] = useState(null);
     const [subtaskParent, setSubtaskParent] = useState(null);
+    const [editTask, setEditTask] = useState(null);
 
     useEffect(() => { load(); }, [id]);
 
@@ -119,11 +132,59 @@ export default function ProjectDirectory() {
         setCompanies(await getReference('companies'));
         setBrands(await getReference('brands'));
         setUsers(await getReference('users'));
-        await loadTasks();
+        // `form` state isn't committed yet at this point in the render, so
+        // autoFileOrphans needs the just-computed `sections` passed in
+        // directly rather than reading it off (stale) component state.
+        await loadTasks(sections);
         loadMessages();
     }
 
-    async function loadTasks() {
+    async function loadTasks(sectionsOverride) {
+        const list = await (await fetch(`/api/tasks?project=${id}`)).json();
+        setProjectTasks(list);
+        await autoFileOrphans(list, sectionsOverride ?? form?.sections ?? []);
+    }
+
+    // Silently files any task whose department maps to an action (Design /
+    // Development) but has no stage yet — legacy tasks, or ones added
+    // before this project had that action — so they never linger in
+    // "Other tasks". Runs after every task load; a no-op once nothing's
+    // left to fix.
+    async function autoFileOrphans(list, sections) {
+        const orphans = list.filter((t) => !t.stageType && DEPT_STAGE_MAP[t.department]);
+        if (!orphans.length) return;
+
+        let nextSections = sections;
+        let sectionsChanged = false;
+        const stageIdFor = {};
+        for (const t of orphans) {
+            const stageType = DEPT_STAGE_MAP[t.department];
+            if (!stageIdFor[stageType]) {
+                let sec = nextSections.find((s) => s.type === stageType);
+                if (!sec) {
+                    sec = { id: uid(), type: stageType, createdAt: new Date().toISOString(), data: stageDefaults(stageType) };
+                    nextSections = [...nextSections, sec];
+                    sectionsChanged = true;
+                }
+                stageIdFor[stageType] = sec.id;
+            }
+        }
+
+        if (sectionsChanged) {
+            // Only patch `sections` — never risk saving other unsaved edits
+            // the user might have pending on the project form.
+            await fetch(`/api/projects/${id}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sections: nextSections }),
+            });
+            setForm((f) => (f ? { ...f, sections: nextSections } : f));
+        }
+
+        await Promise.all(orphans.map((t) => fetch(`/api/tasks/${t._id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stageType: DEPT_STAGE_MAP[t.department], stageId: stageIdFor[DEPT_STAGE_MAP[t.department]] }),
+        })));
+
         setProjectTasks(await (await fetch(`/api/tasks?project=${id}`)).json());
     }
 
@@ -191,6 +252,39 @@ export default function ProjectDirectory() {
             sections: [...f.sections, { id: uid(), type, createdAt: new Date().toISOString(), data: stageDefaults(type) }],
         }));
         toast.success(`${STAGE_LABELS[type]} added — remember to Save.`);
+    }
+
+    // Makes sure a Design/Development action exists on this project,
+    // creating and persisting one if needed, and returns its section id.
+    // Used to file a task under the right action based on its department
+    // instead of leaving it in the unlinked "Other tasks" bucket.
+    async function ensureStageSection(type) {
+        const existing = form.sections.find((s) => s.type === type);
+        if (existing) return existing.id;
+
+        const section = { id: uid(), type, createdAt: new Date().toISOString(), data: stageDefaults(type) };
+        const nextSections = [...form.sections, section];
+        // Only patch `sections` — the project may have other unsaved edits
+        // pending (dirty), and this shouldn't silently persist those too.
+        const res = await fetch(`/api/projects/${id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sections: nextSections }),
+        });
+        if (res.ok) {
+            setForm((f) => ({ ...f, sections: nextSections }));
+            toast.success(`${STAGE_LABELS[type]} action added.`);
+        }
+        return section.id;
+    }
+
+    // Where a brand-new task should land, based on the department picked
+    // for it — see DEPT_STAGE_MAP. Falls back to unlinked when the
+    // department has no mapping.
+    async function resolveTaskStage(department) {
+        const stageType = DEPT_STAGE_MAP[department];
+        if (!stageType) return { stageType: null, stageId: null };
+        const stageId = await ensureStageSection(stageType);
+        return { stageType, stageId };
     }
 
     async function removeStage(sectionId) {
@@ -266,6 +360,14 @@ export default function ProjectDirectory() {
                 open={!!subtaskParent}
                 onClose={() => setSubtaskParent(null)}
                 onChange={loadTasks}
+            />
+            <TaskEditModal
+                task={editTask}
+                users={users}
+                open={!!editTask}
+                onClose={() => setEditTask(null)}
+                onChange={loadTasks}
+                uploadFiles={uploadFiles}
             />
 
             {/* Header */}
@@ -441,7 +543,7 @@ export default function ProjectDirectory() {
                             <StageTaskBoard
                                 projectId={id} stageType="design" sectionId={s.id} users={users}
                                 tasks={projectTasks} onChanged={loadTasks} openProgress={setProgressTask}
-                                openSubtasks={setSubtaskParent}
+                                openSubtasks={setSubtaskParent} openEdit={setEditTask}
                                 uploadFiles={uploadFiles} addLabel="+ Add design details…"
                             />
                         )}
@@ -449,6 +551,7 @@ export default function ProjectDirectory() {
                             <DevelopmentStage
                                 projectId={id} section={s} users={users} tasks={projectTasks}
                                 onChanged={loadTasks} openProgress={setProgressTask} openSubtasks={setSubtaskParent}
+                                openEdit={setEditTask}
                                 uploadFiles={uploadFiles} updateStageData={updateStageData}
                             />
                         )}
@@ -480,7 +583,9 @@ export default function ProjectDirectory() {
                 <StageTaskBoard
                     projectId={id} stageType={null} sectionId={null} users={users}
                     tasks={projectTasks} onChanged={loadTasks} openProgress={setProgressTask}
-                    openSubtasks={setSubtaskParent} uploadFiles={uploadFiles} addLabel="+ Add task…"
+                    openSubtasks={setSubtaskParent} openEdit={setEditTask}
+                    resolveStage={resolveTaskStage}
+                    uploadFiles={uploadFiles} addLabel="+ Add task…"
                 />
             </div>
 
@@ -554,7 +659,14 @@ function KickoffStage({ section, users, updateStageData }) {
 }
 
 function TaskAddForm({ users, onSubmit, onCancel, saving, uploadFiles, submitLabel }) {
-    const [form, setForm] = useState({ title: '', description: '', assignee: '', dueDate: '', priority: 'medium', trackProgress: false, unit: '', target: '', attachments: [] });
+    const [form, setForm] = useState({ title: '', description: '', assignee: '', department: '', dueDate: '', priority: 'medium', trackProgress: false, unit: '', target: '', attachments: [] });
+
+    // Picking an assignee suggests their team's department, but only while
+    // the field hasn't been touched — an explicit choice always wins.
+    function selectAssignee(id) {
+        const u = users.find((x) => x._id === id);
+        setForm((f) => ({ ...f, assignee: id, department: f.department || u?.team || '' }));
+    }
 
     return (
         <div className="rounded-xl border border-line p-3">
@@ -566,10 +678,14 @@ function TaskAddForm({ users, onSubmit, onCancel, saving, uploadFiles, submitLab
                 className="input mb-2.5" placeholder="Details (optional)" rows={2}
                 value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
             />
-            <div className="mb-2.5 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <select className="input" value={form.assignee} onChange={(e) => setForm({ ...form, assignee: e.target.value })}>
+            <div className="mb-2.5 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <select className="input" value={form.assignee} onChange={(e) => selectAssignee(e.target.value)}>
                     <option value="">Unassigned</option>
                     {users.map((u) => <option key={u._id} value={u._id}>{u.name}</option>)}
+                </select>
+                <select className="input" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>
+                    <option value="" disabled>Department…</option>
+                    {DEPARTMENTS.map((d) => <option key={d} value={d}>{departmentLabel(d)}</option>)}
                 </select>
                 <input type="date" className="input" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
                 <select className="input" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
@@ -611,7 +727,7 @@ function TaskAddForm({ users, onSubmit, onCancel, saving, uploadFiles, submitLab
     );
 }
 
-function StageTaskRow({ task, onToggle, onDelete, openProgress, openSubtasks }) {
+function StageTaskRow({ task, onToggle, onDelete, openProgress, openSubtasks, openEdit }) {
     return (
         <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-line px-3 py-2.5">
             <input
@@ -622,6 +738,7 @@ function StageTaskRow({ task, onToggle, onDelete, openProgress, openSubtasks }) 
                 <p className={`truncate text-sm ${task.status === 'completed' ? 'text-neutral-500 line-through' : 'font-medium'}`}>{task.title}</p>
                 <p className="truncate text-xs text-neutral-500">
                     {task.assignedTo?.map((u) => u.name).join(', ') || 'Unassigned'}
+                    {task.department && ` · ${departmentLabel(task.department)}`}
                     {task.dueDate && (
                         <span className={isOverdue(task) ? ' text-red-500' : ''}> · due {formatDate(task.dueDate)}</span>
                     )}
@@ -640,16 +757,20 @@ function StageTaskRow({ task, onToggle, onDelete, openProgress, openSubtasks }) 
                     {task.progress?.completed || 0}{task.target ? `/${task.target}` : ''} {task.unit || ''}
                 </button>
             )}
+            <button className="btn-ghost shrink-0 !px-2.5 !py-1 !text-xs" onClick={() => openEdit(task)}>Edit</button>
             <button className="shrink-0 text-xs text-neutral-500 hover:text-red-400" onClick={() => onDelete(task)}>✕</button>
         </div>
     );
 }
 
-function StageTaskBoard({ projectId, stageType, sectionId, users, tasks, onChanged, openProgress, openSubtasks, uploadFiles, addLabel }) {
+function StageTaskBoard({ projectId, stageType, sectionId, users, tasks, onChanged, openProgress, openSubtasks, openEdit, resolveStage, uploadFiles, addLabel }) {
     const [adding, setAdding] = useState(false);
     const [saving, setSaving] = useState(false);
 
-    const list = tasks.filter((t) => t.stageType === stageType && t.stageId === sectionId);
+    // Older tasks predate the stageType/stageId fields and simply don't have
+    // them set (undefined, not null) — treat that the same as "no stage" so
+    // they still show up here instead of silently disappearing.
+    const list = tasks.filter((t) => (t.stageType ?? null) === (stageType ?? null) && (t.stageId ?? null) === (sectionId ?? null));
     const sorted = [...list].sort((a, b) => (a.status === 'completed') - (b.status === 'completed'));
 
     async function toggle(t) {
@@ -671,21 +792,33 @@ function StageTaskBoard({ projectId, stageType, sectionId, users, tasks, onChang
 
     async function submit(form) {
         if (!form.title.trim()) return toast.error('Title is required.');
+        if (!form.department) return toast.error('Pick a department.');
         setSaving(true);
         try {
-            const assignee = users.find((u) => u._id === form.assignee);
+            // Boards with an explicit stage (kickoff/design/development/…)
+            // keep the task right where it was added. Only the unlinked
+            // "Other tasks" board (stageType === null) gets resolveStage,
+            // which routes the task into its department's proper action.
+            let targetStageType = stageType, targetStageId = sectionId;
+            if (resolveStage) {
+                const resolved = await resolveStage(form.department);
+                if (resolved.stageType) {
+                    targetStageType = resolved.stageType;
+                    targetStageId = resolved.stageId;
+                }
+            }
             const res = await fetch('/api/tasks', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     title: form.title, description: form.description, project: projectId,
                     assignedTo: form.assignee ? [form.assignee] : [],
-                    department: assignee?.team || '', priority: form.priority, dueDate: form.dueDate || null,
+                    department: form.department, priority: form.priority, dueDate: form.dueDate || null,
                     trackProgress: form.trackProgress, unit: form.unit, target: form.target,
-                    stageType, stageId: sectionId, attachments: form.attachments,
+                    stageType: targetStageType, stageId: targetStageId, attachments: form.attachments,
                 }),
             });
             if (!res.ok) return toast.error('Failed to add task.');
-            toast.success('Task added.');
+            toast.success(targetStageType && targetStageType !== stageType ? `Task added under ${STAGE_LABELS[targetStageType]}.` : 'Task added.');
             setAdding(false);
             onChanged();
         } finally {
@@ -699,7 +832,10 @@ function StageTaskBoard({ projectId, stageType, sectionId, users, tasks, onChang
             {sorted.length > 0 && (
                 <div className="mb-3 space-y-1.5">
                     {sorted.map((t) => (
-                        <StageTaskRow key={t._id} task={t} onToggle={toggle} onDelete={del} openProgress={openProgress} openSubtasks={openSubtasks} />
+                        <StageTaskRow
+                            key={t._id} task={t} onToggle={toggle} onDelete={del}
+                            openProgress={openProgress} openSubtasks={openSubtasks} openEdit={openEdit}
+                        />
                     ))}
                 </div>
             )}
@@ -716,7 +852,7 @@ function StageTaskBoard({ projectId, stageType, sectionId, users, tasks, onChang
     );
 }
 
-function DevelopmentStage({ projectId, section, users, tasks, onChanged, openProgress, openSubtasks, uploadFiles, updateStageData }) {
+function DevelopmentStage({ projectId, section, users, tasks, onChanged, openProgress, openSubtasks, openEdit, uploadFiles, updateStageData }) {
     const { attachments } = section.data;
     return (
         <>
@@ -744,7 +880,7 @@ function DevelopmentStage({ projectId, section, users, tasks, onChanged, openPro
             <StageTaskBoard
                 projectId={projectId} stageType="development" sectionId={section.id} users={users}
                 tasks={tasks} onChanged={onChanged} openProgress={openProgress} openSubtasks={openSubtasks}
-                uploadFiles={uploadFiles} addLabel="+ Add new task…"
+                openEdit={openEdit} uploadFiles={uploadFiles} addLabel="+ Add new task…"
             />
         </>
     );
