@@ -11,7 +11,9 @@ export async function POST(req) {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     const token = signToken({ id: user._id.toString(), role: user.role, team: user.team, name: user.name });
-    const res = NextResponse.json({ id: user._id, name: user.name, role: user.role });
+    // Same shape as /api/auth/me returns, so the client can cache this response
+    // directly as the session instead of immediately re-fetching it.
+    const res = NextResponse.json({ id: user._id, name: user.name, role: user.role, team: user.team });
     res.cookies.set('token', token, { httpOnly: true, path: '/', maxAge: 604800 });
     return res;
 }

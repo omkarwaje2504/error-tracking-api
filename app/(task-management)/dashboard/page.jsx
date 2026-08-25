@@ -7,6 +7,7 @@ import DailyReportModal from '@/components/DailyReportModal';
 import EmptyState from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
+import { getSession } from '@/lib/session';
 import { priorityMeta, isOverdue, formatDate, pointsFor } from '@/lib/taskDisplay';
 
 export default function Dashboard() {
@@ -14,8 +15,6 @@ export default function Dashboard() {
     const [user, setUser] = useState(null);
     const [tasks, setTasks] = useState([]);
     const [projects, setProjects] = useState([]);
-    const [companies, setCompanies] = useState([]);
-    const [brands, setBrands] = useState([]);
     const [loading, setLoading] = useState(true);
 
     // filters
@@ -30,14 +29,12 @@ export default function Dashboard() {
 
     async function load() {
         setLoading(true);
-        const me = await fetch('/api/auth/me');
-        if (!me.ok) return router.push('/login');
-        setUser(await me.json());
+        const me = await getSession();
+        if (!me) return router.push('/login');
+        setUser(me);
 
         setTasks(await (await fetch('/api/tasks?mine=true')).json());
         setProjects(await (await fetch('/api/projects')).json());
-        setCompanies(await (await fetch('/api/companies')).json());
-        setBrands(await (await fetch('/api/brands')).json());
         setLoading(false);
     }
 

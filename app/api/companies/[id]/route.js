@@ -12,7 +12,7 @@ export async function PUT(req, { params }) {
     if (!name || !name.trim()) {
         return NextResponse.json({ error: 'Name is required' }, { status: 400 });
     }
-    await db.collection('companies').updateOne({ _id: oid(id) }, { $set: { name: name.trim() } });
+    await db.collection('companies').updateOne({ _id: oid(id) }, { $set: { name: name.trim(), updatedAt: new Date() } });
     const company = await db.collection('companies').findOne({ _id: oid(id) });
     return NextResponse.json(company);
 }
@@ -30,6 +30,6 @@ export async function DELETE(req, { params }) {
         await db.collection('companies').deleteOne({ _id: oid(id) });
         return NextResponse.json({ ok: true, permanent: true });
     }
-    await db.collection('companies').updateOne({ _id: oid(id) }, { $set: { deleted: true } });
+    await db.collection('companies').updateOne({ _id: oid(id) }, { $set: { deleted: true, updatedAt: new Date() } });
     return NextResponse.json({ ok: true });
 }

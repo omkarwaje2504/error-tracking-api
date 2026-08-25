@@ -11,13 +11,32 @@ export async function GET(req) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const db = await connectDB();
 
-    const brandId = new URL(req.url).searchParams.get('brand');
+    const params = new URL(req.url).searchParams;
+    const brandId = params.get('brand');
+    const companyId = params.get('company');
+    const statusFilter = params.get('status'); // 'active' | 'completed' | 'all'
+    const page = params.get('page') ? Math.max(1, parseInt(params.get('page'), 10) || 1) : null;
+    const limit = params.get('limit') ? Math.min(200, Math.max(1, parseInt(params.get('limit'), 10) || 50)) : null;
+
     const match = { deleted: { $ne: true } };
     if (brandId) match.brand = oid(brandId);
+    if (statusFilter === 'active') match.status = { $ne: 'completed' };
+    else if (statusFilter === 'completed') match.status = 'completed';
+    if (companyId) {
+        const companyBrands = await db.collection('brands')
+            .find({ company: oid(companyId), deleted: { $ne: true } }).project({ _id: 1 }).toArray();
+        match.$or = [
+            { company: oid(companyId) },
+            { brand: { $in: companyBrands.map((b) => b._id) } },
+        ];
+    }
+
+    const total = (page || limit) ? await db.collection('projects').countDocuments(match) : null;
 
     const projects = await db.collection('projects').aggregate([
         { $match: match },
         { $sort: { createdAt: -1 } },
+        ...(limit ? [{ $skip: ((page || 1) - 1) * limit }, { $limit: limit }] : []),
         { $lookup: { from: 'brands', localField: 'brand', foreignField: '_id', as: 'brand' } },
         { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
         { $lookup: { from: 'companies', localField: 'company', foreignField: '_id', as: 'company' } },
@@ -44,6 +63,10 @@ export async function GET(req) {
             }
         },
     ]).toArray();
+
+    if (total !== null) {
+        return NextResponse.json({ projects, total, page: page || 1, limit: limit || total, totalPages: limit ? Math.ceil(total / limit) : 1 });
+    }
     return NextResponse.json(projects);
 }
 

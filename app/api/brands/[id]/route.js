@@ -10,7 +10,7 @@ export async function PUT(req, { params }) {
     const { id } = await params;
     const { name, company } = await req.json();
 
-    const set = {};
+    const set = { updatedAt: new Date() };
     if (name !== undefined) {
         if (!name.trim()) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
         set.name = name.trim();
@@ -45,6 +45,6 @@ export async function DELETE(req, { params }) {
         await db.collection('brands').deleteOne({ _id: oid(id) });
         return NextResponse.json({ ok: true, permanent: true });
     }
-    await db.collection('brands').updateOne({ _id: oid(id) }, { $set: { deleted: true } });
+    await db.collection('brands').updateOne({ _id: oid(id) }, { $set: { deleted: true, updatedAt: new Date() } });
     return NextResponse.json({ ok: true });
 }

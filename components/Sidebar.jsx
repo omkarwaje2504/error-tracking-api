@@ -3,9 +3,10 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  FiCompass, FiHome, FiBriefcase, FiFolder, FiCheckSquare, FiUsers, FiUserCheck, FiTag, FiLogOut,
+  FiCompass, FiHome, FiBriefcase, FiFolder, FiCheckSquare, FiUsers, FiUserCheck, FiTag, FiFileText, FiLogOut,
 } from "react-icons/fi";
 import ThemeToggle from "./ThemeToggle";
+import { clearSession } from "@/lib/session";
 
 const links = [
   { href: "/overview", label: "Overview", icon: FiCompass, roles: ["head"] },
@@ -15,6 +16,7 @@ const links = [
   { href: "/products", label: "Product Types", icon: FiTag },
   { href: "/tasks", label: "Tasks", icon: FiCheckSquare },
   { href: "/team", label: "Team Structure", icon: FiUsers, roles: ["head", "lead"] },
+  { href: "/reports", label: "Daily Reports", icon: FiFileText, roles: ["head", "lead"] },
   { href: "/users", label: "Users", icon: FiUserCheck, roles: ["head"] },
 ];
 
@@ -25,6 +27,7 @@ export default function Sidebar({ user, onAdd }) {
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
+    clearSession();
     router.push("/login");
   }
 

@@ -8,8 +8,9 @@ export async function POST(req) {
     const exists = await db.collection('users').findOne({ email });
     if (exists) return NextResponse.json({ error: 'Email already registered' }, { status: 400 });
     const hashed = await bcrypt.hash(password, 10);
+    const now = new Date();
     const { insertedId } = await db.collection('users').insertOne({
-        name, email, mobile, password: hashed, role, team, deleted: false, createdAt: new Date(),
+        name, email, mobile, password: hashed, role, team, deleted: false, createdAt: now, updatedAt: now,
     });
     return NextResponse.json({ id: insertedId, name });
 }

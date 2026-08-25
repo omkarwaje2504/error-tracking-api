@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { setSession } from "@/lib/session";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -35,6 +36,9 @@ export default function LoginPage() {
       setMode("login");
       return;
     }
+    // Seed the session cache with what the login response already gave us,
+    // instead of every page having to re-fetch /api/auth/me right after.
+    setSession(data);
     router.push("/dashboard");
   }
 

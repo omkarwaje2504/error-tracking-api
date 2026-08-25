@@ -9,6 +9,8 @@ import ProductTypePicker from '@/components/ProductTypePicker';
 import { CardSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
 import { confirmDialog } from '@/lib/confirm';
+import { getSession } from '@/lib/session';
+import { getReference } from '@/lib/referenceCache';
 import { PRIORITY_META, priorityMeta, isOverdue, formatDate, pointsFor } from '@/lib/taskDisplay';
 
 const STATUS_OPTIONS = ['active', 'on-hold', 'completed', 'cancelled'];
@@ -83,9 +85,9 @@ export default function ProjectDirectory() {
     }, [dirty]);
 
     async function load() {
-        const me = await fetch('/api/auth/me');
-        if (!me.ok) return router.push('/login');
-        setUser(await me.json());
+        const me = await getSession();
+        if (!me) return router.push('/login');
+        setUser(me);
 
         const res = await fetch(`/api/projects/${id}`);
         if (!res.ok) { setNotFound(true); return; }
@@ -114,9 +116,9 @@ export default function ProjectDirectory() {
         });
         setDirty(false);
 
-        setCompanies(await (await fetch('/api/companies')).json());
-        setBrands(await (await fetch('/api/brands')).json());
-        setUsers(await (await fetch('/api/users')).json());
+        setCompanies(await getReference('companies'));
+        setBrands(await getReference('brands'));
+        setUsers(await getReference('users'));
         await loadTasks();
         loadMessages();
     }

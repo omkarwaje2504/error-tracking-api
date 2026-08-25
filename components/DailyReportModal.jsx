@@ -2,54 +2,9 @@
 import { useEffect, useState } from 'react';
 import Modal from './Modal';
 import { toast } from '@/lib/toast';
-import { formatDate } from '@/lib/taskDisplay';
-
-function buildReportText(data) {
-    if (!data) return '';
-    const { user, date, completedToday, pending, progressToday } = data;
-    const niceDate = new Date(date).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-
-    const lines = [];
-    lines.push(`Daily Update — ${user.name} — ${niceDate}`);
-    lines.push('');
-
-    lines.push(`✅ Completed today (${completedToday.length})`);
-    if (completedToday.length === 0) {
-        lines.push('- Nothing marked complete yet.');
-    } else {
-        completedToday.forEach((t) => lines.push(`- ${t.title}${t.project?.name ? ` (${t.project.name})` : ''}`));
-    }
-    lines.push('');
-
-    if (progressToday.length > 0) {
-        lines.push('📊 Quantity logged today');
-        progressToday.forEach((p) => {
-            const parts = [];
-            if (p.added) parts.push(`+${p.added} added`);
-            if (p.completed) parts.push(`${p.completed} completed`);
-            if (p.declined) parts.push(`${p.declined} declined`);
-            lines.push(`- ${p.title}${p.project ? ` (${p.project})` : ''} — ${parts.join(', ') || 'no change'}`);
-        });
-        lines.push('');
-    }
-
-    lines.push(`🔄 In progress (${pending.length})`);
-    if (pending.length === 0) {
-        lines.push('- Nothing else pending — all caught up.');
-    } else {
-        pending.forEach((t) => {
-            const due = t.dueDate ? ` — due ${formatDate(t.dueDate)}` : '';
-            lines.push(`- ${t.title}${t.project?.name ? ` (${t.project.name})` : ''}${due}`);
-        });
-    }
-    lines.push('');
-    lines.push('Thanks!');
-
-    return lines.join('\n');
-}
+import { buildReportText } from '@/lib/dailyReportFormat';
 
 export default function DailyReportModal({ open, onClose }) {
-    const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [text, setText] = useState('');
 
@@ -60,8 +15,7 @@ export default function DailyReportModal({ open, onClose }) {
         const res = await fetch('/api/reports/daily');
         if (res.ok) {
             const d = await res.json();
-            setData(d);
-            setText(buildReportText(d));
+            setText(buildReportText(d.user.name, d.date, d.completedToday, d.pending));
         }
         setLoading(false);
     }

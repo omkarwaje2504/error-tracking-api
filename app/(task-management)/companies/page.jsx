@@ -8,6 +8,8 @@ import { CardSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
 import { confirmDialog } from '@/lib/confirm';
 import { colorFor } from '@/lib/colors';
+import { getSession } from '@/lib/session';
+import { getReference } from '@/lib/referenceCache';
 
 export default function CompaniesAndBrands() {
     const router = useRouter();
@@ -29,11 +31,11 @@ export default function CompaniesAndBrands() {
 
     async function load() {
         setLoading(true);
-        const me = await fetch('/api/auth/me');
-        if (!me.ok) return router.push('/login');
-        setUser(await me.json());
-        setCompanies(await (await fetch('/api/companies')).json());
-        setBrands(await (await fetch('/api/brands')).json());
+        const me = await getSession();
+        if (!me) return router.push('/login');
+        setUser(me);
+        setCompanies(await getReference('companies'));
+        setBrands(await getReference('brands'));
         setLoading(false);
     }
 

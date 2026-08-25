@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { getReference } from '@/lib/referenceCache';
 
 /**
  * Type-to-filter combobox for a project's product type. Pick an existing
@@ -16,8 +17,7 @@ export default function ProductTypePicker({ value, onChange }) {
     useEffect(() => { load(); }, []);
 
     async function load() {
-        const res = await fetch('/api/product-types');
-        if (res.ok) setTypes(await res.json());
+        setTypes(await getReference('productTypes'));
     }
 
     useEffect(() => {

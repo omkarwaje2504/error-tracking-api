@@ -6,6 +6,8 @@ import Shell from '@/components/Shell';
 import EmptyState from '@/components/EmptyState';
 import { CardSkeleton } from '@/components/Skeleton';
 import { isOverdue, pointsFor } from '@/lib/taskDisplay';
+import { getSession } from '@/lib/session';
+import { getReference } from '@/lib/referenceCache';
 
 const TEAMS = ['graphic', 'video', 'frontend', 'backend', 'app'];
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -62,14 +64,13 @@ function TeamStructureInner() {
 
     async function load() {
         setLoading(true);
-        const me = await fetch('/api/auth/me');
-        if (!me.ok) return router.push('/login');
-        const u = await me.json();
+        const u = await getSession();
+        if (!u) return router.push('/login');
         if (u.role !== 'lead' && u.role !== 'head') return router.push('/dashboard');
         setUser(u);
         if (u.role === 'lead') setDept(u.team);
 
-        setUsers(await (await fetch('/api/users')).json());
+        setUsers(await getReference('users'));
         setTasks(await (await fetch('/api/tasks')).json());
         setLoading(false);
     }

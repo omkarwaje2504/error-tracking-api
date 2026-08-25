@@ -8,14 +8,20 @@ export async function GET(req) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const db = await connectDB();
-    const projectId = new URL(req.url).searchParams.get('project');
-    const parentId = new URL(req.url).searchParams.get('parent');
-    const teamFilter = new URL(req.url).searchParams.get('team');
-    const assigneeFilter = new URL(req.url).searchParams.get('assignee');
-    const mineOnly = new URL(req.url).searchParams.get('mine') === 'true';
+    const params = new URL(req.url).searchParams;
+    const projectId = params.get('project');
+    const parentId = params.get('parent');
+    const teamFilter = params.get('team');
+    const assigneeFilter = params.get('assignee');
+    const mineOnly = params.get('mine') === 'true';
+    const statusFilter = params.get('status'); // 'active' | 'completed' | 'all'
+    const priorityFilter = params.get('priority');
+    const page = params.get('page') ? Math.max(1, parseInt(params.get('page'), 10) || 1) : null;
+    const limit = params.get('limit') ? Math.min(200, Math.max(1, parseInt(params.get('limit'), 10) || 50)) : null;
 
     const match = { deleted: { $ne: true } };
 
+    if (projectId) match.project = oid(projectId);
     if (parentId) {
         match.parentTask = oid(parentId);        // subtasks of one task
     } else {
@@ -29,6 +35,9 @@ export async function GET(req) {
     if (assigneeFilter) {
         match.assignedTo = oid(assigneeFilter);
     }
+    if (statusFilter === 'active') match.status = 'pending';
+    else if (statusFilter === 'completed') match.status = 'completed';
+    if (priorityFilter) match.priority = priorityFilter;
 
 
     if (mineOnly) {
@@ -45,9 +54,12 @@ export async function GET(req) {
         ];
     }
 
+    const total = (page || limit) ? await db.collection('tasks').countDocuments(match) : null;
+
     const tasks = await db.collection('tasks').aggregate([
         { $match: match },
         { $sort: { createdAt: -1 } },
+        ...(limit ? [{ $skip: ((page || 1) - 1) * limit }, { $limit: limit }] : []),
         {
             $lookup: {
                 from: 'projects', localField: 'project', foreignField: '_id', as: 'project',
@@ -109,6 +121,10 @@ export async function GET(req) {
             }
         },
     ]).toArray();
+
+    if (total !== null) {
+        return NextResponse.json({ tasks, total, page: page || 1, limit: limit || total, totalPages: limit ? Math.ceil(total / limit) : 1 });
+    }
     return NextResponse.json(tasks);
 }
 
@@ -123,12 +139,13 @@ export async function POST(req) {
     if (!title || !title.trim()) {
         return NextResponse.json({ error: 'Title is required' }, { status: 400 });
     }
+    const now = new Date();
     const doc = {
         title, description,
         project: project ? oid(project) : null,
         assignedTo: (assignedTo || []).map(oid),
         createdBy: oid(session.id),
-        status: 'pending', deleted: false, createdAt: new Date(),
+        status: 'pending', deleted: false, createdAt: now, updatedAt: now,
         trackProgress: !!trackProgress,
         unit: unit || '',
         target: target ? Number(target) : null,

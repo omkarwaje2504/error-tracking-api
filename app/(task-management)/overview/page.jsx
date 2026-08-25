@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Shell from '@/components/Shell';
 import { CardSkeleton } from '@/components/Skeleton';
+import { getSession } from '@/lib/session';
+import { getReference } from '@/lib/referenceCache';
 
 const TEAM_GROUPS = [
     { key: 'graphic', label: 'Graphic', teams: ['graphic'] },
@@ -46,13 +48,12 @@ export default function Overview() {
 
     async function load() {
         setLoading(true);
-        const me = await fetch('/api/auth/me');
-        if (!me.ok) return router.push('/login');
-        const u = await me.json();
+        const u = await getSession();
+        if (!u) return router.push('/login');
         if (u.role !== 'head') return router.push('/dashboard');
         setUser(u);
 
-        setUsers(await (await fetch('/api/users')).json());
+        setUsers(await getReference('users'));
         setProjects(await (await fetch('/api/projects')).json());
         setTasks(await (await fetch('/api/tasks')).json());
         const actRes = await fetch('/api/activity?limit=25');

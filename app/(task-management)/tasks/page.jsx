@@ -9,6 +9,8 @@ import EmptyState from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
 import { confirmDialog } from '@/lib/confirm';
+import { getSession } from '@/lib/session';
+import { getReference } from '@/lib/referenceCache';
 import { PRIORITY_META, PRIORITY_ORDER, priorityMeta, isOverdue, formatDate, pointsFor } from '@/lib/taskDisplay';
 
 function TasksInner() {
@@ -30,30 +32,49 @@ function TasksInner() {
     const [progressTask, setProgressTask] = useState(null);
     const [subtaskParent, setSubtaskParent] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [total, setTotal] = useState(0);
+    const PAGE_SIZE = 50;
 
-    // filters
+    // filters — applied server-side, not by fetching everything and filtering here
     const [assignee, setAssignee] = useState(params.get('assignee') || '');
     const [status, setStatus] = useState('active');
     const [priority, setPriority] = useState('');
 
-    useEffect(() => { load(); }, [projectFilter, assignee]);
+    useEffect(() => { load(); }, [projectFilter, assignee, status, priority]);
 
-    async function load() {
-        setLoading(true);
-        const me = await fetch('/api/auth/me');
-        if (!me.ok) return router.push('/login');
-        setUser(await me.json());
-
+    function buildQuery(page) {
         const p = new URLSearchParams();
         if (projectFilter) p.set('project', projectFilter);
         if (assignee) p.set('assignee', assignee);
-        const url = `/api/tasks${p.toString() ? `?${p}` : ''}`;
+        if (status) p.set('status', status);
+        if (priority) p.set('priority', priority);
+        p.set('page', String(page));
+        p.set('limit', String(PAGE_SIZE));
+        return p;
+    }
 
-        setTasks(await (await fetch(url)).json());
+    async function load() {
+        setLoading(true);
+        const me = await getSession();
+        if (!me) return router.push('/login');
+        setUser(me);
+
+        const data = await (await fetch(`/api/tasks?${buildQuery(1)}`)).json();
+        setTasks(data.tasks);
+        setTotal(data.total);
         setProjects(await (await fetch('/api/projects')).json());
-        setUsers(await (await fetch('/api/users')).json());
+        setUsers(await getReference('users'));
         setLoading(false);
+    }
+
+    async function loadMore() {
+        setLoadingMore(true);
+        const nextPage = Math.floor(tasks.length / PAGE_SIZE) + 1;
+        const data = await (await fetch(`/api/tasks?${buildQuery(nextPage)}`)).json();
+        setTasks((t) => [...t, ...data.tasks]);
+        setLoadingMore(false);
     }
 
     function openNew() {
@@ -117,21 +138,16 @@ function TasksInner() {
         });
     }
 
+    // Status/priority/assignee are already applied server-side — this just orders the current page.
     const rows = useMemo(() => {
-        const r = tasks.filter((t) => {
-            if (status === 'active' && t.status !== 'pending') return false;
-            if (status === 'completed' && t.status !== 'completed') return false;
-            if (priority && t.priority !== priority) return false;
-            return true;
-        });
-        return [...r].sort((a, b) => {
+        return [...tasks].sort((a, b) => {
             const aOverdue = isOverdue(a), bOverdue = isOverdue(b);
             if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
             const ap = PRIORITY_ORDER[a.priority] ?? 2, bp = PRIORITY_ORDER[b.priority] ?? 2;
             if (ap !== bp) return ap - bp;
             return new Date(b.createdAt) - new Date(a.createdAt);
         });
-    }, [tasks, status, priority]);
+    }, [tasks]);
 
     return (
         <Shell user={user} onAdd={openNew}>
@@ -302,6 +318,14 @@ function TasksInner() {
                 </table>
               )}
             </div>
+
+            {!loading && tasks.length > 0 && tasks.length < total && (
+                <div className="mt-4 flex flex-col items-center gap-2">
+                    <button className="btn-ghost" onClick={loadMore} disabled={loadingMore}>
+                        {loadingMore ? 'Loading…' : `Load more (${tasks.length} of ${total})`}
+                    </button>
+                </div>
+            )}
 
             <Modal open={open} onClose={closeModal} title={edit ? 'Edit Task' : 'New Task'}>
                 <div className="mb-3.5">

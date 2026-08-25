@@ -7,6 +7,7 @@ import EmptyState from "@/components/EmptyState";
 import { TableSkeleton } from "@/components/Skeleton";
 import { toast } from "@/lib/toast";
 import { confirmDialog } from "@/lib/confirm";
+import { getSession } from "@/lib/session";
 
 const ROLES = ["team-member", "lead", "head"];
 const TEAMS = ["graphic", "video", "frontend", "backend", "app", "all"];
@@ -46,9 +47,9 @@ export default function Users() {
 
   async function load() {
     setLoading(true);
-    const res = await fetch("/api/auth/me");
-    if (!res.ok) return router.push("/login");
-    setMe(await res.json());
+    const me = await getSession();
+    if (!me) return router.push("/login");
+    setMe(me);
     const url = showDeleted ? "/api/users?includeDeleted=true" : "/api/users";
     setUsers(await (await fetch(url)).json());
     setLoading(false);

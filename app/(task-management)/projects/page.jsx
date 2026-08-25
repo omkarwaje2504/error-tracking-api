@@ -6,6 +6,8 @@ import Modal from '@/components/Modal';
 import EmptyState from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
+import { getSession } from '@/lib/session';
+import { getReference } from '@/lib/referenceCache';
 
 function ProjectsInner() {
     const router = useRouter();
@@ -17,27 +19,50 @@ function ProjectsInner() {
     const [brands, setBrands] = useState([]);
     const [companies, setCompanies] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [total, setTotal] = useState(0);
     const [q, setQ] = useState('');
     const [open, setOpen] = useState(false);
     const [saving, setSaving] = useState(false);
     const [form, setForm] = useState({ name: '', description: '', brand: '' });
+    const PAGE_SIZE = 30;
 
-    // filters
+    // filters — applied server-side
     const [status, setStatus] = useState('active');
     const [companyFilter, setCompanyFilter] = useState('');
     const [brandFilter, setBrandFilter] = useState(brandFilterParam || '');
 
-    useEffect(() => { load(); }, []);
+    useEffect(() => { load(); }, [status, companyFilter, brandFilter]);
+
+    function buildQuery(page) {
+        const p = new URLSearchParams();
+        if (status) p.set('status', status);
+        if (companyFilter) p.set('company', companyFilter);
+        if (brandFilter) p.set('brand', brandFilter);
+        p.set('page', String(page));
+        p.set('limit', String(PAGE_SIZE));
+        return p;
+    }
 
     async function load() {
         setLoading(true);
-        const me = await fetch('/api/auth/me');
-        if (!me.ok) return router.push('/login');
-        setUser(await me.json());
-        setProjects(await (await fetch('/api/projects')).json());
-        setBrands(await (await fetch('/api/brands')).json());
-        setCompanies(await (await fetch('/api/companies')).json());
+        const me = await getSession();
+        if (!me) return router.push('/login');
+        setUser(me);
+        const data = await (await fetch(`/api/projects?${buildQuery(1)}`)).json();
+        setProjects(data.projects);
+        setTotal(data.total);
+        setBrands(await getReference('brands'));
+        setCompanies(await getReference('companies'));
         setLoading(false);
+    }
+
+    async function loadMore() {
+        setLoadingMore(true);
+        const nextPage = Math.floor(projects.length / PAGE_SIZE) + 1;
+        const data = await (await fetch(`/api/projects?${buildQuery(nextPage)}`)).json();
+        setProjects((p) => [...p, ...data.projects]);
+        setLoadingMore(false);
     }
 
     function openNew() {
@@ -79,14 +104,10 @@ function ProjectsInner() {
         [brands, companyFilter]
     );
 
-    const rows = useMemo(() => projects.filter((p) => {
-        if (status === 'active' && p.status === 'completed') return false;
-        if (status === 'completed' && p.status !== 'completed') return false;
-        if (companyFilter && p.company?._id !== companyFilter && p.brand?.company?._id !== companyFilter) return false;
-        if (brandFilter && p.brand?._id !== brandFilter) return false;
-        if (q && !p.name?.toLowerCase().includes(q.toLowerCase())) return false;
-        return true;
-    }), [projects, status, companyFilter, brandFilter, q]);
+    // Status/company/brand are already applied server-side — only the free-text search happens here.
+    const rows = useMemo(() => projects.filter((p) => (
+        !q || p.name?.toLowerCase().includes(q.toLowerCase())
+    )), [projects, q]);
 
     const hasFilters = status !== 'active' || companyFilter || brandFilter || q;
 
@@ -176,6 +197,14 @@ function ProjectsInner() {
                     </table>
                 )}
             </div>
+
+            {!loading && !q && projects.length > 0 && projects.length < total && (
+                <div className="mt-4 flex flex-col items-center gap-2">
+                    <button className="btn-ghost" onClick={loadMore} disabled={loadingMore}>
+                        {loadingMore ? 'Loading…' : `Load more (${projects.length} of ${total})`}
+                    </button>
+                </div>
+            )}
 
             <Modal open={open} onClose={closeModal} title="New Project">
                 <div className="mb-3.5">

@@ -12,7 +12,7 @@ export async function PUT(req, { params }) {
     if (!name || !name.trim()) {
         return NextResponse.json({ error: 'Name is required' }, { status: 400 });
     }
-    await db.collection('productTypes').updateOne({ _id: oid(id) }, { $set: { name: name.trim() } });
+    await db.collection('productTypes').updateOne({ _id: oid(id) }, { $set: { name: name.trim(), updatedAt: new Date() } });
     const doc = await db.collection('productTypes').findOne({ _id: oid(id) });
     return NextResponse.json(doc);
 }
@@ -22,6 +22,6 @@ export async function DELETE(req, { params }) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const db = await connectDB();
     const { id } = await params;
-    await db.collection('productTypes').updateOne({ _id: oid(id) }, { $set: { deleted: true } });
+    await db.collection('productTypes').updateOne({ _id: oid(id) }, { $set: { deleted: true, updatedAt: new Date() } });
     return NextResponse.json({ ok: true });
 }

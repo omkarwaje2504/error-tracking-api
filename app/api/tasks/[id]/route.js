@@ -14,7 +14,7 @@ export async function PUT(req, { params }) {
     const existing = await db.collection('tasks').findOne({ _id: oid(id) });
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-    const set = {};
+    const set = { updatedAt: new Date() };
     if (body.title !== undefined) set.title = body.title;
     if (body.description !== undefined) set.description = body.description;
     if (body.status !== undefined) set.status = body.status;
@@ -61,7 +61,7 @@ export async function DELETE(req, { params }) {
         await db.collection('tasks').deleteOne({ _id: oid(id) });
         return NextResponse.json({ ok: true, permanent: true });
     }
-    await db.collection('tasks').updateOne({ _id: oid(id) }, { $set: { deleted: true } });
-    await db.collection('tasks').updateMany({ parentTask: oid(id) }, { $set: { deleted: true } });
+    await db.collection('tasks').updateOne({ _id: oid(id) }, { $set: { deleted: true, updatedAt: new Date() } });
+    await db.collection('tasks').updateMany({ parentTask: oid(id) }, { $set: { deleted: true, updatedAt: new Date() } });
     return NextResponse.json({ ok: true });
 }

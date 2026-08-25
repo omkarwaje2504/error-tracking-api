@@ -18,7 +18,7 @@ export async function PUT(req, { params }) {
     return NextResponse.json({ error: 'Not allowed' }, { status: 403 });
   }
 
-  const set = {};
+  const set = { updatedAt: new Date() };
   if (body.name !== undefined) set.name = body.name;
   if (body.mobile !== undefined) set.mobile = body.mobile;
   if (body.email !== undefined) set.email = body.email;
@@ -60,6 +60,6 @@ export async function DELETE(req, { params }) {
     await db.collection('users').deleteOne({ _id: oid(id) });
     return NextResponse.json({ ok: true, permanent: true });
   }
-  await db.collection('users').updateOne({ _id: oid(id) }, { $set: { deleted: true } });
+  await db.collection('users').updateOne({ _id: oid(id) }, { $set: { deleted: true, updatedAt: new Date() } });
   return NextResponse.json({ ok: true });
 }
