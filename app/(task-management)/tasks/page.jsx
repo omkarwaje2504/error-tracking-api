@@ -11,23 +11,15 @@ import { toast } from '@/lib/toast';
 import { confirmDialog } from '@/lib/confirm';
 import { getSession } from '@/lib/session';
 import { getReference } from '@/lib/referenceCache';
+import { getTeamSetting, setTeamSetting } from '@/lib/teamSettings';
 import { colorFor } from '@/lib/colors';
 import { PRIORITY_META, PRIORITY_ORDER, priorityMeta, isOverdue, formatDate, pointsFor, DEPARTMENTS, departmentLabel } from '@/lib/taskDisplay';
 
 // Empty string stands for "no product type set" on the task's project —
 // kept in the hidden-types list the same way the API's excludeProductTypes
-// param expects it. Mirrors the same pattern on the Projects list page.
+// param expects it. Same shared setting keys as the Projects list page, so
+// hiding a type from either page hides it on both.
 const NO_TYPE = '';
-
-function loadHiddenProductTypes() {
-    if (typeof window === 'undefined') return [];
-    try {
-        const raw = JSON.parse(localStorage.getItem('tasks:hiddenProductTypes') || '[]');
-        return Array.isArray(raw) ? raw : [];
-    } catch {
-        return [];
-    }
-}
 
 function TasksInner() {
     const router = useRouter();
@@ -39,8 +31,10 @@ function TasksInner() {
     const [projects, setProjects] = useState([]);
     const [users, setUsers] = useState([]);
     const [productTypes, setProductTypes] = useState([]);
-    // Hidden product types persist across visits, same as on Projects.
-    const [hiddenProductTypes, setHiddenProductTypes] = useState(loadHiddenProductTypes);
+    // Shared team preferences — same lead-vs-head-vs-team-member rules as
+    // the Projects page. Loaded once in init(); see lib/teamSettings.
+    const [hiddenProductTypes, setHiddenProductTypes] = useState([]);
+    const [settingsLoaded, setSettingsLoaded] = useState(false);
     const [open, setOpen] = useState(false);
     const [edit, setEdit] = useState(null);
     const [form, setForm] = useState({
@@ -63,13 +57,14 @@ function TasksInner() {
     const [department, setDepartment] = useState('');
     const [productTypeFilter, setProductTypeFilter] = useState('');
 
-    useEffect(() => {
-        load();
-    }, [projectFilter, assignee, status, priority, department, productTypeFilter, hiddenProductTypes]);
+    useEffect(() => { init(); }, []);
 
+    // Wait for the shared type-filter settings to load once before the
+    // first task fetch, so it doesn't briefly show an unfiltered list.
     useEffect(() => {
-        localStorage.setItem('tasks:hiddenProductTypes', JSON.stringify(hiddenProductTypes));
-    }, [hiddenProductTypes]);
+        if (!settingsLoaded) return;
+        load();
+    }, [settingsLoaded, projectFilter, assignee, status, priority, department, productTypeFilter, hiddenProductTypes]);
 
     function buildQuery(page) {
         const p = new URLSearchParams();
@@ -85,21 +80,48 @@ function TasksInner() {
         return p;
     }
 
-    function toggleProductType(name) {
-        setHiddenProductTypes((h) => (h.includes(name) ? h.filter((t) => t !== name) : [...h, name]));
+    async function toggleProductType(name) {
+        const next = hiddenProductTypes.includes(name) ? hiddenProductTypes.filter((t) => t !== name) : [...hiddenProductTypes, name];
+        setHiddenProductTypes(next);
+        if (!(await setTeamSetting('hiddenProductTypes', next))) toast.error('Failed to save.');
     }
 
-    function selectProductType(name) {
+    async function selectProductType(name) {
         setProductTypeFilter(name);
-        if (name) setHiddenProductTypes((h) => h.filter((t) => t !== name));
+        const nextHidden = name ? hiddenProductTypes.filter((t) => t !== name) : hiddenProductTypes;
+        if (nextHidden !== hiddenProductTypes) setHiddenProductTypes(nextHidden);
+        const ok = await Promise.all([
+            setTeamSetting('productTypeFilter', name),
+            nextHidden !== hiddenProductTypes ? setTeamSetting('hiddenProductTypes', nextHidden) : Promise.resolve(true),
+        ]);
+        if (ok.some((x) => !x)) toast.error('Failed to save.');
+    }
+
+    async function clearTypeFilters() {
+        setProductTypeFilter('');
+        setHiddenProductTypes([]);
+        const ok = await Promise.all([
+            setTeamSetting('productTypeFilter', ''),
+            setTeamSetting('hiddenProductTypes', []),
+        ]);
+        if (ok.some((x) => !x)) toast.error('Failed to save.');
+    }
+
+    async function init() {
+        const me = await getSession();
+        if (!me) return router.push('/login');
+        setUser(me);
+        const [hidden, shownType] = await Promise.all([
+            getTeamSetting('hiddenProductTypes', []),
+            getTeamSetting('productTypeFilter', ''),
+        ]);
+        setHiddenProductTypes(hidden || []);
+        setProductTypeFilter(shownType || '');
+        setSettingsLoaded(true);
     }
 
     async function load() {
         setLoading(true);
-        const me = await getSession();
-        if (!me) return router.push('/login');
-        setUser(me);
-
         const data = await (await fetch(`/api/tasks?${buildQuery(1)}`)).json();
         setTasks(data.tasks);
         setTotal(data.total);
@@ -184,6 +206,10 @@ function TasksInner() {
         () => [{ _id: '__no-type__', name: 'No type', key: NO_TYPE }, ...productTypes.map((t) => ({ ...t, key: t.name }))],
         [productTypes]
     );
+    // Only leads and heads get controls for the type filter/hide-list —
+    // team-members still see the resulting (lead-set) filtered list, just
+    // without a UI to change it. See app/api/settings/route.js.
+    const canEditTypes = user?.role === 'lead' || user?.role === 'head';
 
     // Status/priority/assignee are already applied server-side — this just orders the current page.
     const rows = useMemo(() => {
@@ -235,16 +261,18 @@ function TasksInner() {
                     <option value="">All departments</option>
                     {DEPARTMENTS.map((d) => <option key={d} value={d}>{departmentLabel(d)}</option>)}
                 </select>
-                <select className="input w-auto" value={productTypeFilter} onChange={(e) => selectProductType(e.target.value)}>
-                    <option value="">All product types</option>
-                    {productTypes.map((t) => <option key={t._id} value={t.name}>{t.name}</option>)}
-                </select>
+                {canEditTypes && (
+                    <select className="input w-auto" value={productTypeFilter} onChange={(e) => selectProductType(e.target.value)}>
+                        <option value="">All product types</option>
+                        {productTypes.map((t) => <option key={t._id} value={t.name}>{t.name}</option>)}
+                    </select>
+                )}
                 {(status !== 'active' || assignee || priority || department || productTypeFilter || hiddenProductTypes.length > 0) && (
                     <button
                         className="btn-ghost"
                         onClick={() => {
-                            setStatus('active'); setAssignee(''); setPriority('');
-                            setDepartment(''); setProductTypeFilter(''); setHiddenProductTypes([]);
+                            setStatus('active'); setAssignee(''); setPriority(''); setDepartment('');
+                            if (canEditTypes) clearTypeFilters();
                         }}
                     >
                         Clear
@@ -252,7 +280,7 @@ function TasksInner() {
                 )}
             </div>
 
-            {typeOptions.length > 1 && (
+            {canEditTypes && typeOptions.length > 1 && (
                 <div className="mb-4 flex flex-wrap items-center gap-1.5">
                     <span className="mr-1 text-xs font-medium uppercase tracking-wider text-neutral-500">Hide type</span>
                     {typeOptions.map((t) => {
