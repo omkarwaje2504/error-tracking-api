@@ -2,7 +2,7 @@
 // ─────────────────────────────────────────────
 //  components/left-panel/tools/LayersTool.jsx
 // ─────────────────────────────────────────────
-import { PanelHeader, LBtn } from "../../ui-atoms";
+import { PanelHeader, LBtn } from "@/app/canvas/components/ui-atoms";
 
 export default function LayersTool({
   elements,

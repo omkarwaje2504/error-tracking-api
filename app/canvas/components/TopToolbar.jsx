@@ -4,8 +4,8 @@
 //  Context-sensitive formatting bar at the top.
 // ─────────────────────────────────────────────
 import { useState } from "react";
-import { TB, Divider } from "./ui-atoms";
-import { FONTS, PALETTE } from "../../../lib/constants";
+import { TB, Divider } from "@/app/canvas/components/ui-atoms";
+import { FONTS, PALETTE } from "@/app/canvas/lib/constants";
 
 export default function TopToolbar({
   selectedEl,
@@ -17,6 +17,7 @@ export default function TopToolbar({
   onMoveDown,
   onOpenEffects,
   onShowShortcuts,
+  onExport,
   onUndo,
   onRedo,
 }) {
@@ -153,7 +154,10 @@ export default function TopToolbar({
         onClick={onShowShortcuts}
         className="px-3 py-1.5 rounded bg-gray-900 border border-gray-700 text-white text-sm hover:bg-gray-800 whitespace-nowrap"
       >⌨ Keys</button>
-      <button className="px-3 py-1.5 rounded bg-gray-900 border border-gray-700 text-white text-sm hover:bg-gray-800 whitespace-nowrap">
+      <button
+        onClick={onExport}
+        className="px-3 py-1.5 rounded bg-gray-900 border border-gray-700 text-white text-sm hover:bg-gray-800 whitespace-nowrap"
+      >
         ⬇ Export
       </button>
     </div>

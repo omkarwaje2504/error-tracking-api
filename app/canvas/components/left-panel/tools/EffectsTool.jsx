@@ -5,7 +5,7 @@
 //  Shadow · Global Opacity · Letter Spacing · Line Height
 // ─────────────────────────────────────────────
 import { useState } from "react";
-import { Toggle } from "../../ui-atoms";
+import { Toggle } from "@/app/canvas/components/ui-atoms";
 
 // ── primitive atoms ──────────────────────────
 
@@ -113,37 +113,6 @@ export default function EffectsTool({ el, onUpdate, onClose }) {
           />
         </FxSection>
 
-        {/* ── Curved Text (text only) ── */}
-        {el.type === "text" && (
-          <FxSection
-            label="Curved Text"
-            enabled={fx.curved?.enabled}
-            onToggle={(v) => upFx("curved", { enabled: v })}
-          >
-            <div className="flex flex-col gap-1">
-              <div className="flex justify-between text-xs text-gray-500">
-                <span>-100</span>
-                <span className="text-white font-medium">Power: {fx.curved?.power ?? 50}</span>
-                <span>100</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range" min={-100} max={100}
-                  value={fx.curved?.power ?? 50}
-                  onChange={(e) => upFx("curved", { power: Number(e.target.value) })}
-                  className="flex-1 accent-white"
-                />
-                <input
-                  type="number" min={-100} max={100}
-                  value={fx.curved?.power ?? 50}
-                  onChange={(e) => upFx("curved", { power: Number(e.target.value) })}
-                  className="w-14 bg-gray-900 border border-gray-700 text-white text-xs rounded px-2 py-1 text-center"
-                />
-              </div>
-            </div>
-          </FxSection>
-        )}
-
         {/* ── Text Stroke (text only) ── */}
         {el.type === "text" && (
           <FxSection
@@ -160,36 +129,6 @@ export default function EffectsTool({ el, onUpdate, onClose }) {
               label="Width" min={0} max={20}
               value={fx.stroke?.width ?? 2}
               onChange={(v) => upFx("stroke", { width: v })}
-            />
-          </FxSection>
-        )}
-
-        {/* ── Background highlight (text only) ── */}
-        {el.type === "text" && (
-          <FxSection
-            label="Background"
-            enabled={fx.bg?.enabled}
-            onToggle={(v) => upFx("bg", { enabled: v })}
-          >
-            <FxSlider
-              label="Corner radius" min={0} max={100}
-              value={fx.bg?.cornerRadius ?? 0}
-              onChange={(v) => upFx("bg", { cornerRadius: v })}
-            />
-            <FxSlider
-              label="Padding" min={0} max={100}
-              value={fx.bg?.padding ?? 8}
-              onChange={(v) => upFx("bg", { padding: v })}
-            />
-            <FxSlider
-              label="Opacity" min={0} max={100}
-              value={fx.bg?.opacity ?? 100}
-              onChange={(v) => upFx("bg", { opacity: v })}
-            />
-            <FxColorRow
-              label="Color"
-              value={fx.bg?.color ?? "#3b82f6"}
-              onChange={(v) => upFx("bg", { color: v })}
             />
           </FxSection>
         )}

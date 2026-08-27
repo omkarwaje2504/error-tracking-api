@@ -8,18 +8,27 @@ export const px2unit = (px, u) => (px / PX_PER[u]).toFixed(2);
 export const unit2px = (v,  u) => Math.round(parseFloat(v) * PX_PER[u]);
 export const clamp   = (v, min, max) => Math.max(min, Math.min(max, v));
 
+// Konva anchors circle/triangle/star at their *center* (x,y), but rect/
+// text/line/arrow/image at their top-left corner — elBox needs to know
+// which, or it reports a box shifted a full width/height off from where
+// the shape actually is.
+const CENTER_ANCHORED = new Set(["circle", "triangle", "star"]);
+
 /**
  * Returns the axis-aligned bounding box of a design element descriptor.
  */
 export function elBox(el) {
-  const x = el.x ?? 0;
-  const y = el.y ?? 0;
+  const ex = el.x ?? 0;
+  const ey = el.y ?? 0;
   let w = el.width  ?? 160;
   let h = el.height ?? 80;
 
   if (el.type === "circle")   { w = (el.radius ?? 80) * 2; h = w; }
   if (el.type === "triangle") { w = (el.radius ?? 80) * 2; h = w; }
   if (el.type === "star")     { w = (el.outerRadius ?? 80) * 2; h = w; }
+
+  const x = CENTER_ANCHORED.has(el.type) ? ex - w / 2 : ex;
+  const y = CENTER_ANCHORED.has(el.type) ? ey - h / 2 : ey;
 
   return { x, y, w, h, cx: x + w / 2, cy: y + h / 2, r: x + w, b: y + h };
 }

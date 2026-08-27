@@ -2,7 +2,7 @@
 // ─────────────────────────────────────────────
 //  components/ShortcutsOverlay.jsx
 // ─────────────────────────────────────────────
-import { SHORTCUTS } from "../../../lib/constants";
+import { SHORTCUTS } from "@/app/canvas/lib/constants";
 
 export default function ShortcutsOverlay({ onClose }) {
   return (

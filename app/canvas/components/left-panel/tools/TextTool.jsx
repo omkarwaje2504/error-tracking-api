@@ -2,8 +2,8 @@
 // ─────────────────────────────────────────────
 //  components/left-panel/tools/TextTool.jsx
 // ─────────────────────────────────────────────
-import { PanelHeader, ColorGrid } from "../../ui-atoms";
-import { PALETTE } from "../../../../../lib/constants";
+import { PanelHeader, ColorGrid } from "@/app/canvas/components/ui-atoms";
+import { PALETTE } from "@/app/canvas/lib/constants";
 
 const TEXT_PRESETS = [
   { label: "Add Heading",     size: 48, font: "Playfair Display" },

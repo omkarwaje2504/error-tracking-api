@@ -4,13 +4,13 @@
 //  Icon rail + sliding content panel.
 //  Imports one tool component per panel slot.
 // ─────────────────────────────────────────────
-import { LEFT_TOOLS } from "../../../../lib/constants";
-import TextTool    from "./tools/TextTool";
-import ShapesTool  from "./tools/ShapesTool";
-import PhotosTool  from "./tools/PhotosTool";
-import LayersTool  from "./tools/LayersTool";
-import SizeTool    from "./tools/SizeTool";
-import EffectsTool from "./tools/EffectsTool";
+import { LEFT_TOOLS } from "@/app/canvas/lib/constants";
+import TextTool    from "@/app/canvas/components/left-panel/tools/TextTool";
+import ShapesTool  from "@/app/canvas/components/left-panel/tools/ShapesTool";
+import PhotosTool  from "@/app/canvas/components/left-panel/tools/PhotosTool";
+import LayersTool  from "@/app/canvas/components/left-panel/tools/LayersTool";
+import SizeTool    from "@/app/canvas/components/left-panel/tools/SizeTool";
+import EffectsTool from "@/app/canvas/components/left-panel/tools/EffectsTool";
 
 export default function LeftPanel({
   activeTool,

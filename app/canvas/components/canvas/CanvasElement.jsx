@@ -9,14 +9,19 @@ import {
   Text, Rect, Circle, RegularPolygon, Star,
   Line, Arrow, Image as KImage, Transformer,
 } from "react-konva";
+import { elBox } from "@/app/canvas/lib/utils";
+import { OFFCANVAS_OPACITY } from "@/app/canvas/lib/constants";
 
 export default function CanvasElement({
   el,
+  canvasW,
+  canvasH,
   isSelected,
   onSelect,
   onChange,
   onDragMove,
   stageRef,
+  zoom,
 }) {
   const shapeRef = useRef(null);
   const trRef    = useRef(null);
@@ -28,6 +33,30 @@ export default function CanvasElement({
       trRef.current.getLayer()?.batchDraw();
     }
   }, [isSelected]);
+
+  // Konva filters (Blur, and any future filter) only ever render against a
+  // node's *cached* raster — without an explicit cache(), `filters`/
+  // `blurRadius` are silently ignored. Re-cache whenever the blur toggle,
+  // amount, or the node's own visual footprint changes; drop the cache
+  // once blur is off so untouched nodes stay crisp and cache-free.
+  const blurOn     = !!el.effects?.blur?.enabled;
+  const blurAmount = el.effects?.blur?.amount ?? 0;
+  useEffect(() => {
+    const node = shapeRef.current;
+    if (!node) return;
+    if (blurOn) {
+      node.cache();
+      node.getLayer()?.batchDraw();
+    } else if (node.isCached()) {
+      node.clearCache();
+      node.getLayer()?.batchDraw();
+    }
+  }, [
+    blurOn, blurAmount, el.width, el.height, el.radius, el.innerRadius, el.outerRadius,
+    el.fill, el.text, el.fontSize, el.fontFamily, el.bold, el.italic,
+    el.underline, el.strikethrough, el.align, el.cornerRadius,
+    el.effects?.stroke, el.effects?.shadow,
+  ]);
 
   // ── event handlers ───────────────────────
   const handleDragEnd = (e) =>
@@ -61,7 +90,10 @@ export default function CanvasElement({
     const node   = shapeRef.current;
     const box    = stage.container().getBoundingClientRect();
     const absPos = node.getAbsolutePosition();
-    const scale  = stage.scaleX();
+    // Konva's own stage scale stays fixed at 1 (see MainCanvas) — the only
+    // zoom in play is the CSS `transform: scale()` on an ancestor div, so
+    // that's what has to convert design-space px to actual screen px here.
+    const scale  = (zoom ?? 100) / 100;
 
     const ta = document.createElement("textarea");
     ta.value = el.text ?? "";
@@ -70,8 +102,8 @@ export default function CanvasElement({
       zIndex:        "9999",
       resize:        "none",
       outline:       "none",
-      left:          `${box.left + absPos.x}px`,
-      top:           `${box.top  + absPos.y}px`,
+      left:          `${box.left + absPos.x * scale}px`,
+      top:           `${box.top  + absPos.y * scale}px`,
       width:         `${Math.max(node.width() * scale + 20, 160)}px`,
       minHeight:     "40px",
       fontSize:      `${(el.fontSize ?? 24) * scale}px`,
@@ -116,12 +148,19 @@ export default function CanvasElement({
     ? { stroke: el.effects.stroke.color ?? "#000000", strokeWidth: el.effects.stroke.width ?? 2 }
     : { stroke: "transparent", strokeWidth: 0 };
 
+  // Elements dragged (fully or partially) outside the true canvas still
+  // render — into the surrounding bleed area — just dimmed, so it's clear
+  // they're outside what actually gets exported.
+  const box = elBox(el);
+  const isOffCanvas = canvasW != null && canvasH != null
+    && (box.x < 0 || box.y < 0 || box.r > canvasW || box.b > canvasH);
+
   const common = {
     id:        el.id,
     x:         el.x        ?? 0,
     y:         el.y        ?? 0,
     rotation:  el.rotation ?? 0,
-    opacity:   (el.opacity ?? 100) / 100,
+    opacity:   ((el.opacity ?? 100) / 100) * (isOffCanvas ? OFFCANVAS_OPACITY : 1),
     draggable: !el.locked,
     onClick:   (e) => { e.cancelBubble = true; onSelect(el.id, e.evt.shiftKey || e.evt.metaKey); },
     onTap:     (e) => { e.cancelBubble = true; onSelect(el.id, false); },
@@ -129,8 +168,7 @@ export default function CanvasElement({
     onDragMove: handleDragMove,
     onTransformEnd: handleTransformEnd,
     ...shadowProps,
-    filters:    el.effects?.blur?.enabled ? ["Blur"] : [],
-    blurRadius: el.effects?.blur?.amount  ?? 0,
+    ...(el.effects?.blur?.enabled ? { filters: ["Blur"], blurRadius: el.effects.blur.amount ?? 0 } : {}),
   };
 
   // ── node switch ──────────────────────────
@@ -140,7 +178,7 @@ export default function CanvasElement({
     case "text":
       node = (
         <Text
-          ref={shapeRef} {...common}
+          ref={shapeRef} {...common} {...strokeProps}
           text={el.text ?? "Text"}
           fontSize={el.fontSize ?? 24}
           fontFamily={el.fontFamily ?? "Montserrat"}

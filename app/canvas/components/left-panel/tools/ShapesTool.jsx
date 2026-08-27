@@ -2,8 +2,8 @@
 // ─────────────────────────────────────────────
 //  components/left-panel/tools/ShapesTool.jsx
 // ─────────────────────────────────────────────
-import { PanelHeader, ColorGrid } from "../../ui-atoms";
-import { SHAPE_TYPES, PALETTE } from "../../../../../lib/constants";
+import { PanelHeader, ColorGrid } from "@/app/canvas/components/ui-atoms";
+import { SHAPE_TYPES, PALETTE } from "@/app/canvas/lib/constants";
 
 export default function ShapesTool({ addShape, fill, setFill }) {
   return (

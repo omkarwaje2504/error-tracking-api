@@ -13,6 +13,15 @@ export const PX_PER = { px: 1, cm: 37.7953, mm: 3.77953, in: 96 };
 
 export const SNAP_THRESHOLD = 8; // px distance that triggers magnetic guides
 
+// How much "pasteboard" space renders around the true canvas, in design-
+// space px. Elements dragged out here still render (dimmed) instead of
+// being clipped the instant they cross the canvas edge.
+export const CANVAS_BLEED = 300;
+
+// Opacity multiplier applied to an element when any part of its bounding
+// box falls outside the true canvas bounds.
+export const OFFCANVAS_OPACITY = 0.35;
+
 export const PRESET_SIZES = [
   { label: "Instagram Post",  w: 800,  h: 800  },
   { label: "Instagram Story", w: 450,  h: 800  },

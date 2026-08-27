@@ -5,7 +5,7 @@
 //  canvas dimensions, undo/redo history, clipboard.
 // ─────────────────────────────────────────────
 import { useState, useRef, useCallback, useMemo } from "react";
-import { genId } from "../../../lib/utils";
+import { genId } from "@/app/canvas/lib/utils";
 
 export default function useDesignStore(initialW = 800, initialH = 600) {
   const [elements,    setElements]    = useState([]);

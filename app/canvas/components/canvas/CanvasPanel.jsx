@@ -5,8 +5,8 @@
 //  canvas info label, selected-element tooltip.
 // ─────────────────────────────────────────────
 import { useRef, useCallback, useEffect } from "react";
-import MainCanvas from "./MainCanvas";
-import { clamp, px2unit } from "../../../../lib/utils";
+import MainCanvas from "@/app/canvas/components/canvas/MainCanvas";
+import { clamp, px2unit } from "@/app/canvas/lib/utils";
 
 export default function CanvasPanel({
   canvasW,
@@ -23,38 +23,37 @@ export default function CanvasPanel({
   onChangeAndSnap,
   zoom,
   onZoomChange,
+  stageRef: externalStageRef,
 }) {
   const viewportRef = useRef(null);
-  const stageRef = useRef(null);
+  const ownStageRef = useRef(null);
+  // Accept a ref from the parent (e.g. for export) but still work standalone.
+  const stageRef = externalStageRef ?? ownStageRef;
 
   useEffect(() => {
     fitToViewport();
   }, [canvasW, canvasH]);
 
   // ── fit canvas inside viewport ───────────
+  // Zoom is applied in exactly one place: the CSS `transform: scale(...)`
+  // wrapper below (same mechanism the wheel/+/- zoom controls use). This
+  // only *computes* the scale that fits the viewport and hands it to that
+  // shared `zoom` state — it must never also touch the Konva stage's own
+  // scale/position, or the two transforms compound and content ends up
+  // scaled by (fit² instead of fit) and mispositioned, which is what made
+  // elements effectively vanish on non-widescreen canvas sizes.
   const fitToViewport = useCallback(() => {
     const vp = viewportRef.current;
-    const stage = stageRef.current;
-    if (!vp || !stage) return;
+    if (!vp) return;
 
     const vw = vp.offsetWidth;
     const vh = vp.offsetHeight;
-
     const padding = 80;
 
     const scaleX = (vw - padding) / canvasW;
     const scaleY = (vh - padding) / canvasH;
-
     const safeScale = Math.max(0.05, Math.min(scaleX, scaleY));
 
-    stage.scale({ x: safeScale, y: safeScale });
-
-    stage.position({
-      x: (vw - canvasW * safeScale) / 2,
-      y: (vh - canvasH * safeScale) / 2,
-    });
-
-    stage.batchDraw();
     onZoomChange(Math.round(safeScale * 100));
   }, [canvasW, canvasH, onZoomChange]);
 

@@ -8,8 +8,9 @@
 
 import { useRef, useState, useEffect } from "react";
 import { Stage, Layer, Rect, Line } from "react-konva";
-import CanvasElement from "./CanvasElement";
-import { elBox, computeGuides, clamp } from "../../../../lib/utils";
+import CanvasElement from "@/app/canvas/components/canvas/CanvasElement";
+import { elBox, computeGuides, clamp } from "@/app/canvas/lib/utils";
+import { CANVAS_BLEED } from "@/app/canvas/lib/constants";
 
 // ── Magnetic guide lines ─────────────────────
 function MagneticGuides({ guides, canvasW, canvasH }) {
@@ -80,6 +81,7 @@ export default function MainCanvas({
   stageRef,
 }) {
   const innerRef = useRef(null);
+  const layerRef = useRef(null);
   const [guides, setGuides] = useState([]);
   const [marquee, setMarquee] = useState(null);
 
@@ -106,21 +108,21 @@ export default function MainCanvas({
   };
 
   // ── marquee start ─────────────────────────
+  // getRelativePointerPosition() (vs. stage.getPointerPosition()) returns
+  // the pointer already translated into the *layer's* local coordinate
+  // space — i.e. compensated for the layer's CANVAS_BLEED offset — so it
+  // lines up directly with element x/y and elBox() without any manual
+  // BLEED arithmetic here.
   const handleMouseDown = (e) => {
     const stage = innerRef.current;
 
     if (e.target === stage || e.target.name() === "canvas-bg") {
-      const stagePos = stage.getPointerPosition();
+      const pos = layerRef.current.getRelativePointerPosition();
 
       isMarqueeRef.current = true;
-      marqueeStartRef.current = stagePos;
+      marqueeStartRef.current = pos;
 
-      setMarquee({
-        x1: stagePos.x,
-        y1: stagePos.y,
-        x2: stagePos.x,
-        y2: stagePos.y,
-      });
+      setMarquee({ x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y });
 
       onDeselect();
     }
@@ -130,8 +132,7 @@ export default function MainCanvas({
   const handleMouseMove = () => {
     if (!isMarqueeRef.current || !marqueeStartRef.current) return;
 
-    const stage = innerRef.current;
-    const pos = stage.getPointerPosition();
+    const pos = layerRef.current.getRelativePointerPosition();
 
     setMarquee((m) => (m ? { ...m, x2: pos.x, y2: pos.y } : null));
   };
@@ -182,16 +183,17 @@ export default function MainCanvas({
   };
 
   return (
+    // Stage is sized canvasW/H *plus* a CANVAS_BLEED margin on every side —
+    // real raster space for off-canvas elements to render into (dimmed),
+    // instead of the browser's <canvas> silently clipping anything drawn
+    // past its own pixel bounds. The stage itself has no CSS background so
+    // the parent viewport's pasteboard shows through the bleed area; only
+    // the "canvas-bg" Rect below (sized to the *true* canvas) is opaque.
     <Stage
       ref={innerRef}
-      width={canvasW}
-      height={canvasH}
-      style={{
-        display: "block",
-        border: "1px solid #ccc",
-        backgroundColor: bgColor,
-        cursor: "default",
-      }}
+      width={canvasW + CANVAS_BLEED * 2}
+      height={canvasH + CANVAS_BLEED * 2}
+      style={{ display: "block", cursor: "default" }}
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -200,8 +202,11 @@ export default function MainCanvas({
       onTouchMove={handleMouseMove}
       onTouchEnd={handleMouseUp}
     >
-      <Layer>
-        {/* Canvas background */}
+      {/* Offsetting the layer (not each element) means every child below
+          keeps using plain, un-shifted design-space coordinates — x=0,y=0
+          is still the true canvas's top-left corner from their point of view. */}
+      <Layer ref={layerRef} x={CANVAS_BLEED} y={CANVAS_BLEED}>
+        {/* True canvas area */}
         <Rect
           name="canvas-bg"
           x={0}
@@ -209,6 +214,8 @@ export default function MainCanvas({
           width={canvasW}
           height={canvasH}
           fill={bgColor}
+          stroke="#00000022"
+          strokeWidth={1}
         />
 
         {/* All elements */}
@@ -216,6 +223,8 @@ export default function MainCanvas({
           <CanvasElement
             key={el.id}
             el={el}
+            canvasW={canvasW}
+            canvasH={canvasH}
             isSelected={selectedIds.includes(el.id)}
             onSelect={(id, additive) =>
               additive ? onMultiSelect([...selectedIds, id]) : onSelect(id)
@@ -225,6 +234,7 @@ export default function MainCanvas({
             }
             onDragMove={handleDragMove}
             stageRef={innerRef}
+            zoom={zoom}
           />
         ))}
 

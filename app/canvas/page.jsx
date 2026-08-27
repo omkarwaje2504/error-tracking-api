@@ -8,8 +8,9 @@
  *  File map
  *  ├── page.jsx                               ← you are here
  *  ├── lib/
- *  │   ├── constants.js                       fonts · palette · presets
- *  │   └── utils.js                           genId · elBox · computeGuides · clamp
+ *  │   ├── constants.js                       fonts · palette · presets · bleed/opacity
+ *  │   ├── utils.js                           genId · elBox · computeGuides · clamp
+ *  │   └── export.js                          PNG export (crops out the bleed area)
  *  ├── hooks/
  *  │   ├── useDesignStore.js                  all element / canvas state + undo
  *  │   └── useKeyboardShortcuts.js            global hotkeys
@@ -34,18 +35,20 @@
  * ╚══════════════════════════════════════════════════════════╝
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
-import useDesignStore        from "./hooks/useDesignStore";
-import useKeyboardShortcuts  from "./hooks/useKeyboardShortcuts";
+import useDesignStore        from "@/app/canvas/hooks/useDesignStore";
+import useKeyboardShortcuts  from "@/app/canvas/hooks/useKeyboardShortcuts";
 
-import LeftPanel             from "./components/left-panel/LeftPanel";
-import TopToolbar            from "./components/TopToolbar";
-import CanvasPanel           from "./components/canvas/CanvasPanel";
-import StatusBar             from "./components/StatusBar";
-import ShortcutsOverlay      from "./components/ShortcutsOverlay";
+import LeftPanel             from "@/app/canvas/components/left-panel/LeftPanel";
+import TopToolbar            from "@/app/canvas/components/TopToolbar";
+import CanvasPanel           from "@/app/canvas/components/canvas/CanvasPanel";
+import StatusBar             from "@/app/canvas/components/StatusBar";
+import ShortcutsOverlay      from "@/app/canvas/components/ShortcutsOverlay";
 
-import { genId } from "./lib/utils";
+import { genId } from "@/app/canvas/lib/utils";
+import { CANVAS_BLEED } from "@/app/canvas/lib/constants";
+import { exportStagePng } from "@/app/canvas/lib/export";
 
 export default function DesignStudio() {
   // ── central store ────────────────────────
@@ -70,6 +73,11 @@ export default function DesignStudio() {
   const [shapeFill,     setShapeFill]     = useState("#3b82f6");
   const [zoom,          setZoom]          = useState(85);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const stageRef = useRef(null);
+
+  const handleExport = useCallback(() => {
+    exportStagePng(stageRef.current, { x: CANVAS_BLEED, y: CANVAS_BLEED, width: canvasW, height: canvasH });
+  }, [canvasW, canvasH]);
 
   // ── seed demo elements on first mount ────
   useEffect(() => {
@@ -192,6 +200,7 @@ export default function DesignStudio() {
           onMoveDown={() => selectedIds.forEach((id) => moveDown(id))}
           onOpenEffects={() => setShowEffects(true)}
           onShowShortcuts={() => setShowShortcuts(true)}
+          onExport={handleExport}
           onUndo={undo}
           onRedo={redo}
         />
@@ -208,6 +217,7 @@ export default function DesignStudio() {
           onChangeElement={updateElement}
           onChangeAndSnap={updateElementAndSnap}
           zoom={zoom}              onZoomChange={setZoom}
+          stageRef={stageRef}
         />
 
         {/* Status bar */}

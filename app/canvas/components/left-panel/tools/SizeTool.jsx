@@ -3,9 +3,9 @@
 //  components/left-panel/tools/SizeTool.jsx
 // ─────────────────────────────────────────────
 import { useState, useEffect } from "react";
-import { PanelHeader } from "../../ui-atoms";
-import { UNITS, PRESET_SIZES } from "../../../../../lib/constants";
-import { px2unit, unit2px } from "../../../../../lib/utils";
+import { PanelHeader } from "@/app/canvas/components/ui-atoms";
+import { UNITS, PRESET_SIZES } from "@/app/canvas/lib/constants";
+import { px2unit, unit2px } from "@/app/canvas/lib/utils";
 
 export default function SizeTool({
   canvasW, canvasH, unit, setUnit, setCanvasW, setCanvasH,

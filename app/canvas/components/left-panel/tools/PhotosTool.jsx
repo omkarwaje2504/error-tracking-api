@@ -3,7 +3,7 @@
 //  components/left-panel/tools/PhotosTool.jsx
 // ─────────────────────────────────────────────
 import { useRef } from "react";
-import { PanelHeader } from "../../ui-atoms";
+import { PanelHeader } from "@/app/canvas/components/ui-atoms";
 
 const STOCK_PHOTOS = [
   { url: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&q=70", label: "Mountains" },
