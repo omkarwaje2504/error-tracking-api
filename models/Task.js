@@ -6,7 +6,12 @@ const TaskSchema = new mongoose.Schema({
     project: { type: mongoose.Schema.Types.ObjectId, ref: 'Project', required: true },
     assignedTo: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    status: { type: String, enum: ['pending', 'completed'], default: 'pending' },
+    // Team members freely move a top-level task between pending/done; only a
+    // lead/head can promote done -> completed, or send it back to pending
+    // (a "revert", optionally with revertNote explaining why). Subtasks
+    // skip this review step entirely and just use pending/completed.
+    status: { type: String, enum: ['pending', 'done', 'completed'], default: 'pending' },
+    revertNote: { type: mongoose.Schema.Types.Mixed, default: null }, // { text, by, byName, at }
     deleted: { type: Boolean, default: false },
 }, { timestamps: true });
 

@@ -1,6 +1,6 @@
 'use client';
 
-export default function Modal({ open, onClose, title, children }) {
+export default function Modal({ open, onClose, title, children, resizable = false }) {
     if (!open) return null;
     return (
         <div
@@ -8,7 +8,11 @@ export default function Modal({ open, onClose, title, children }) {
             onClick={onClose}
         >
             <div
-                className="card relative w-full max-w-md max-h-[90vh] overflow-y-auto"
+                className={`card relative ${resizable
+                    ? 'resize overflow-auto min-w-[320px] min-h-[240px] max-w-[95vw] max-h-[90vh]'
+                    : 'w-full max-w-md max-h-[90vh] overflow-y-auto'
+                }`}
+                style={resizable ? { width: '32rem', height: '30rem' } : undefined}
                 onClick={(e) => e.stopPropagation()}
             >
                 <button

@@ -65,6 +65,11 @@ export default function TaskEditModal({ task, users, open, onClose, onChange, up
 
     return (
         <Modal open={open} onClose={onClose} title="Edit Task">
+            {task.status === 'pending' && task.revertNote && (
+                <p className="mb-3.5 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
+                    ⚠ Sent back by {task.revertNote.byName}: {task.revertNote.text}
+                </p>
+            )}
             <div className="mb-3.5">
                 <label className="label">Title</label>
                 <input className="input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />

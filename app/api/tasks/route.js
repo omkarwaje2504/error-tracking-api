@@ -14,7 +14,7 @@ export async function GET(req) {
     const teamFilter = params.get('team');
     const assigneeFilter = params.get('assignee');
     const mineOnly = params.get('mine') === 'true';
-    const statusFilter = params.get('status'); // 'active' | 'completed' | 'all'
+    const statusFilter = params.get('status'); // 'active' | 'done' | 'completed' | 'all'
     const priorityFilter = params.get('priority');
     const departmentFilter = params.get('department');
     // Product type comes off the task's project, not the task itself — show
@@ -55,7 +55,9 @@ export async function GET(req) {
     if (assigneeFilter) {
         match.assignedTo = oid(assigneeFilter);
     }
-    if (statusFilter === 'active') match.status = 'pending';
+    // 'active' = not yet fully signed off (pending or awaiting lead review).
+    if (statusFilter === 'active') match.status = { $in: ['pending', 'done'] };
+    else if (statusFilter === 'done') match.status = 'done';
     else if (statusFilter === 'completed') match.status = 'completed';
     if (priorityFilter) match.priority = priorityFilter;
 
@@ -98,7 +100,7 @@ export async function GET(req) {
         { $unwind: { path: '$createdBy', preserveNullAndEmptyArrays: true } },
         {
             $project: {
-                title: 1, description: 1, status: 1, createdAt: 1, completedAt: 1,
+                title: 1, description: 1, status: 1, createdAt: 1, completedAt: 1, revertNote: 1,
                 trackProgress: 1, unit: 1, target: 1, parentTask: 1, department: 1,
                 priority: 1, dueDate: 1, stageType: 1, stageId: 1, attachments: 1,
                 'project._id': 1, 'project.name': 1, 'project.projectType': 1,

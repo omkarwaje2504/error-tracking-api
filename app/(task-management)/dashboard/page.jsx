@@ -7,8 +7,9 @@ import DailyReportModal from '@/components/DailyReportModal';
 import EmptyState from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
+import { promptDialog } from '@/lib/confirm';
 import { getSession } from '@/lib/session';
-import { priorityMeta, isOverdue, formatDate, pointsFor } from '@/lib/taskDisplay';
+import { priorityMeta, isOverdue, formatDate, pointsFor, statusMeta, canManageTasks } from '@/lib/taskDisplay';
 
 export default function Dashboard() {
     const router = useRouter();
@@ -38,22 +39,52 @@ export default function Dashboard() {
         setLoading(false);
     }
 
-    const isManager = user?.role === 'lead' || user?.role === 'head';
+    const isManager = canManageTasks(user);
 
-    async function complete(t) {
+    // Free self-service pending <-> done toggle. Once a lead has approved a
+    // task (completed) it's locked here — only Revert can move it.
+    async function toggleDone(t) {
+        if (t.status === 'completed') return;
+        const next = t.status === 'pending' ? 'done' : 'pending';
         const res = await fetch(`/api/tasks/${t._id}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: t.status === 'completed' ? 'pending' : 'completed' }),
+            body: JSON.stringify({ status: next }),
         });
         if (!res.ok) return toast.error('Failed to update task.');
-        toast.success(t.status === 'completed' ? 'Task reopened.' : 'Task marked complete.');
+        toast.success(next === 'done' ? 'Marked done.' : 'Reopened.');
+        load();
+    }
+
+    async function approve(t) {
+        const res = await fetch(`/api/tasks/${t._id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'completed' }),
+        });
+        const data = await res.json();
+        if (!res.ok) return toast.error(data.error || 'Failed to complete task.');
+        toast.success('Task marked complete.');
+        load();
+    }
+
+    async function revert(t) {
+        const note = await promptDialog(`Send "${t.title}" back to pending — what needs to change?`, {
+            placeholder: 'Feedback for the assignee…', confirmLabel: 'Send back', required: true,
+        });
+        if (!note) return;
+        const res = await fetch(`/api/tasks/${t._id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'pending', revertNote: note }),
+        });
+        const data = await res.json();
+        if (!res.ok) return toast.error(data.error || 'Failed to send task back.');
+        toast.success('Sent back with feedback.');
         load();
     }
 
     // client-side status + search + sort ("mine" scope is already applied server-side)
     const rows = useMemo(() => {
         let r = tasks.filter((t) => {
-            if (status === 'active' && t.status !== 'pending') return false;
+            if (status === 'active' && t.status === 'completed') return false;
             if (status === 'completed' && t.status !== 'completed') return false;
             if (q && !t.title.toLowerCase().includes(q.toLowerCase())) return false;
             return true;
@@ -88,15 +119,17 @@ export default function Dashboard() {
     }
 
     const pending = tasks.filter((t) => t.status === 'pending').length;
-    const done = tasks.filter((t) => t.status === 'completed').length;
+    const awaitingReview = tasks.filter((t) => t.status === 'done').length;
+    const completedCount = tasks.filter((t) => t.status === 'completed').length;
     const overdue = tasks.filter(isOverdue).length;
     const qtyDone = tasks.reduce((s, t) => s + (t.progress?.completed || 0), 0);
     const qtyPending = tasks.reduce((s, t) => s + ((t.progress?.added || 0) - (t.progress?.completed || 0)), 0);
 
     const stats = [
         { label: 'Pending', value: pending },
+        { label: 'Done (awaiting review)', value: awaitingReview, accent: awaitingReview > 0 ? 'text-amber-400' : '' },
         { label: 'Overdue', value: overdue, accent: overdue > 0 ? 'text-red-500' : '' },
-        { label: 'Completed', value: done, accent: 'text-green-500' },
+        { label: 'Completed', value: completedCount, accent: 'text-green-500' },
         { label: 'Qty done', value: qtyDone },
         { label: 'Qty pending', value: qtyPending, accent: qtyPending > 0 ? 'text-amber-400' : '' },
         { label: 'Projects', value: projects.length },
@@ -182,15 +215,26 @@ export default function Dashboard() {
                                     {t.trackProgress ? (
                                         <span className="text-neutral-600">—</span>
                                     ) : (
-                                        <input type="checkbox" className="h-[18px] w-[18px] accent-neutral-900 dark:accent-white"
-                                            checked={t.status === 'completed'} onChange={() => complete(t)} />
+                                        <input
+                                            type="checkbox"
+                                            className="h-[18px] w-[18px] accent-neutral-900 dark:accent-white disabled:opacity-40"
+                                            checked={t.status !== 'pending'}
+                                            disabled={t.status === 'completed'}
+                                            onChange={() => toggleDone(t)}
+                                            title={t.status === 'completed' ? 'Completed — a lead can revert it' : 'Mark done'}
+                                        />
                                     )}
                                 </td>
                                 <td className="px-4 py-3">
-                                    <span className={t.status === 'completed' ? 'text-neutral-500 line-through' : 'font-medium'}>
+                                    <span className={t.status !== 'pending' ? 'text-neutral-500 line-through' : 'font-medium'}>
                                         {t.parentTask && <span className="mr-1 text-neutral-600">↳</span>}
                                         {t.title}
                                     </span>
+                                    {t.status === 'pending' && t.revertNote && (
+                                        <p className="mt-0.5 truncate text-xs text-amber-500" title={t.revertNote.text}>
+                                            ⚠ {t.revertNote.byName}: {t.revertNote.text}
+                                        </p>
+                                    )}
                                 </td>
                                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{t.project?.name || '—'}</td>
 
@@ -231,9 +275,8 @@ export default function Dashboard() {
 
                                 <td className="px-4 py-3">
                                     <div className="flex items-center gap-1.5">
-                                        <span className={`rounded-full px-2.5 py-1 text-xs ${t.status === 'completed' ? 'bg-green-500/15 text-green-400' : 'bg-neutral-500/15 text-neutral-500'
-                                            }`}>
-                                            {t.status}
+                                        <span className={`rounded-full px-2.5 py-1 text-xs ${statusMeta(t.status).className}`}>
+                                            {statusMeta(t.status).label}
                                         </span>
                                         {t.status === 'completed' && (
                                             <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">+{pointsFor(t)} pts</span>
@@ -242,12 +285,18 @@ export default function Dashboard() {
                                 </td>
 
                                 <td className="px-4 py-3">
-                                    <div className="flex justify-end gap-2">
+                                    <div className="flex flex-wrap justify-end gap-2">
                                         {t.trackProgress && (
                                             <button className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={() => setProgressTask(t)}>Log</button>
                                         )}
-                                        {!t.trackProgress && t.status !== 'completed' && (
-                                            <button className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={() => complete(t)}>Complete</button>
+                                        {!t.trackProgress && t.status === 'pending' && (
+                                            <button className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={() => toggleDone(t)}>Mark done</button>
+                                        )}
+                                        {isManager && t.status === 'done' && (
+                                            <button className="btn-ghost !px-3 !py-1.5 !text-xs !text-green-500" onClick={() => approve(t)}>✓ Complete</button>
+                                        )}
+                                        {isManager && (t.status === 'done' || t.status === 'completed') && (
+                                            <button className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={() => revert(t)}>↩ Revert</button>
                                         )}
                                         {t.project?._id && (
                                             <button className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={() => router.push(`/projects/${t.project._id}`)}>Open</button>

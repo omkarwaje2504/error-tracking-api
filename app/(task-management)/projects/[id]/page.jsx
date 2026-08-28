@@ -7,12 +7,14 @@ import ProgressModal from '@/components/ProgressModal';
 import SubtaskModal from '@/components/SubtaskModal';
 import TaskEditModal from '@/components/TaskEditModal';
 import ProductTypePicker from '@/components/ProductTypePicker';
+import PrinterPicker from '@/components/PrinterPicker';
 import { CardSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
-import { confirmDialog } from '@/lib/confirm';
+import { confirmDialog, promptDialog } from '@/lib/confirm';
 import { getSession } from '@/lib/session';
 import { getReference } from '@/lib/referenceCache';
-import { PRIORITY_META, priorityMeta, isOverdue, formatDate, pointsFor, DEPARTMENTS, departmentLabel } from '@/lib/taskDisplay';
+import { uploadFilesToR2 } from '@/lib/upload';
+import { PRIORITY_META, priorityMeta, isOverdue, formatDate, pointsFor, DEPARTMENTS, departmentLabel, statusMeta, canManageTasks } from '@/lib/taskDisplay';
 
 const STATUS_OPTIONS = ['active', 'on-hold', 'completed', 'cancelled'];
 
@@ -42,6 +44,7 @@ function stageDefaults(type) {
                     fileCheckSize: false, fileCheckQuantity: false, fileCheckColors: false,
                 },
                 bleedFile: null, otherInstructions: '',
+                mailReceiptPhoto: null, fileSharedLink: '',
             };
         case 'delivery':
             return { fileReceivedDate: '', completionDate: '' };
@@ -84,6 +87,7 @@ export default function ProjectDirectory() {
     const [deleting, setDeleting] = useState(false);
     const [newStageType, setNewStageType] = useState('kickoff');
     const [dirty, setDirty] = useState(false);
+    const [uploadError, setUploadError] = useState('');
     const [progressTask, setProgressTask] = useState(null);
     const [subtaskParent, setSubtaskParent] = useState(null);
     const [editTask, setEditTask] = useState(null);
@@ -219,16 +223,22 @@ export default function ProjectDirectory() {
         router.push('/projects');
     }
 
+    // Uploads go straight from the browser to R2 (uploadFilesToR2) — our
+    // server only ever hands out a presigned URL, it never sees the bytes.
     async function uploadFiles(fileList) {
         const files = Array.from(fileList || []);
         if (!files.length) return [];
-        const fd = new FormData();
-        files.forEach((f) => fd.append('file', f));
-        const res = await fetch('/api/upload', { method: 'POST', body: fd });
-        const data = await res.json();
-        if (!res.ok) { toast.error(data.error || 'Upload failed.'); return []; }
-        toast.success(files.length > 1 ? `${files.length} files uploaded.` : 'File uploaded.');
-        return data.files;
+        setUploadError('');
+        const { uploaded, errors } = await uploadFilesToR2(files);
+        if (errors.length) {
+            const msg = errors.map((e) => `${e.name}: ${e.message}`).join(' · ');
+            setUploadError(msg);
+            toast.error(errors.length === files.length ? 'Upload failed.' : 'Some files failed to upload.');
+        }
+        if (uploaded.length) {
+            toast.success(uploaded.length > 1 ? `${uploaded.length} files uploaded.` : 'File uploaded.');
+        }
+        return uploaded;
     }
 
     // Every form mutation should go through this so we can track unsaved changes.
@@ -497,6 +507,9 @@ export default function ProjectDirectory() {
                         }}
                     />
                 </div>
+                {uploadError && (
+                    <p className="mb-2.5 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{uploadError}</p>
+                )}
                 {form.attachments.length === 0 ? (
                     <p className="text-sm text-neutral-500">No files yet.</p>
                 ) : (
@@ -541,7 +554,7 @@ export default function ProjectDirectory() {
                         )}
                         {s.type === 'design' && (
                             <StageTaskBoard
-                                projectId={id} stageType="design" sectionId={s.id} users={users}
+                                projectId={id} stageType="design" sectionId={s.id} users={users} user={user}
                                 tasks={projectTasks} onChanged={loadTasks} openProgress={setProgressTask}
                                 openSubtasks={setSubtaskParent} openEdit={setEditTask}
                                 uploadFiles={uploadFiles} addLabel="+ Add design details…"
@@ -549,7 +562,7 @@ export default function ProjectDirectory() {
                         )}
                         {s.type === 'development' && (
                             <DevelopmentStage
-                                projectId={id} section={s} users={users} tasks={projectTasks}
+                                projectId={id} section={s} users={users} user={user} tasks={projectTasks}
                                 onChanged={loadTasks} openProgress={setProgressTask} openSubtasks={setSubtaskParent}
                                 openEdit={setEditTask}
                                 uploadFiles={uploadFiles} updateStageData={updateStageData}
@@ -581,7 +594,7 @@ export default function ProjectDirectory() {
             </p>
             <div className="card mb-8">
                 <StageTaskBoard
-                    projectId={id} stageType={null} sectionId={null} users={users}
+                    projectId={id} stageType={null} sectionId={null} users={users} user={user}
                     tasks={projectTasks} onChanged={loadTasks} openProgress={setProgressTask}
                     openSubtasks={setSubtaskParent} openEdit={setEditTask}
                     resolveStage={resolveTaskStage}
@@ -727,15 +740,20 @@ function TaskAddForm({ users, onSubmit, onCancel, saving, uploadFiles, submitLab
     );
 }
 
-function StageTaskRow({ task, onToggle, onDelete, openProgress, openSubtasks, openEdit }) {
+function StageTaskRow({ task, user, onToggle, onApprove, onRevert, onDelete, openProgress, openSubtasks, openEdit }) {
+    const isManager = canManageTasks(user);
     return (
         <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-line px-3 py-2.5">
             <input
-                type="checkbox" checked={task.status === 'completed'} onChange={() => onToggle(task)}
-                className="h-[18px] w-[18px] shrink-0 accent-neutral-900 dark:accent-white"
+                type="checkbox"
+                checked={task.status !== 'pending'}
+                disabled={task.status === 'completed'}
+                onChange={() => onToggle(task)}
+                title={task.status === 'completed' ? 'Completed — a lead can revert it' : 'Mark done'}
+                className="h-[18px] w-[18px] shrink-0 accent-neutral-900 dark:accent-white disabled:opacity-40"
             />
             <div className="min-w-0 flex-1">
-                <p className={`truncate text-sm ${task.status === 'completed' ? 'text-neutral-500 line-through' : 'font-medium'}`}>{task.title}</p>
+                <p className={`truncate text-sm ${task.status !== 'pending' ? 'text-neutral-500 line-through' : 'font-medium'}`}>{task.title}</p>
                 <p className="truncate text-xs text-neutral-500">
                     {task.assignedTo?.map((u) => u.name).join(', ') || 'Unassigned'}
                     {task.department && ` · ${departmentLabel(task.department)}`}
@@ -744,11 +762,23 @@ function StageTaskRow({ task, onToggle, onDelete, openProgress, openSubtasks, op
                     )}
                     {task.attachments?.length > 0 && ` · ${task.attachments.length} file${task.attachments.length === 1 ? '' : 's'}`}
                 </p>
+                {task.status === 'pending' && task.revertNote && (
+                    <p className="truncate text-xs text-amber-500" title={task.revertNote.text}>
+                        ⚠ {task.revertNote.byName}: {task.revertNote.text}
+                    </p>
+                )}
             </div>
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] ${statusMeta(task.status).className}`}>{statusMeta(task.status).label}</span>
             {task.status === 'completed' && (
                 <span className="shrink-0 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">+{pointsFor(task)} pts</span>
             )}
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] ${priorityMeta(task.priority).className}`}>{priorityMeta(task.priority).label}</span>
+            {isManager && task.status === 'done' && (
+                <button className="btn-ghost shrink-0 !px-2.5 !py-1 !text-xs !text-green-500" onClick={() => onApprove(task)}>✓ Complete</button>
+            )}
+            {isManager && (task.status === 'done' || task.status === 'completed') && (
+                <button className="btn-ghost shrink-0 !px-2.5 !py-1 !text-xs" onClick={() => onRevert(task)}>↩ Revert</button>
+            )}
             <button className="btn-ghost shrink-0 !px-2.5 !py-1 !text-xs" onClick={() => openSubtasks(task)}>
                 Subtasks{task.subCount?.total ? ` (${task.subCount.done}/${task.subCount.total})` : ''}
             </button>
@@ -763,7 +793,7 @@ function StageTaskRow({ task, onToggle, onDelete, openProgress, openSubtasks, op
     );
 }
 
-function StageTaskBoard({ projectId, stageType, sectionId, users, tasks, onChanged, openProgress, openSubtasks, openEdit, resolveStage, uploadFiles, addLabel }) {
+function StageTaskBoard({ projectId, stageType, sectionId, users, user, tasks, onChanged, openProgress, openSubtasks, openEdit, resolveStage, uploadFiles, addLabel }) {
     const [adding, setAdding] = useState(false);
     const [saving, setSaving] = useState(false);
 
@@ -773,12 +803,42 @@ function StageTaskBoard({ projectId, stageType, sectionId, users, tasks, onChang
     const list = tasks.filter((t) => (t.stageType ?? null) === (stageType ?? null) && (t.stageId ?? null) === (sectionId ?? null));
     const sorted = [...list].sort((a, b) => (a.status === 'completed') - (b.status === 'completed'));
 
+    // Free self-service pending <-> done toggle. Completed is locked here —
+    // only a lead/head's Revert action (server-enforced) can move it back.
     async function toggle(t) {
+        if (t.status === 'completed') return;
+        const next = t.status === 'pending' ? 'done' : 'pending';
         const res = await fetch(`/api/tasks/${t._id}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: t.status === 'pending' ? 'completed' : 'pending' }),
+            body: JSON.stringify({ status: next }),
         });
         if (!res.ok) return toast.error('Failed to update task.');
+        onChanged();
+    }
+
+    async function approve(t) {
+        const res = await fetch(`/api/tasks/${t._id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'completed' }),
+        });
+        const data = await res.json();
+        if (!res.ok) return toast.error(data.error || 'Failed to complete task.');
+        toast.success('Task marked complete.');
+        onChanged();
+    }
+
+    async function revert(t) {
+        const note = await promptDialog(`Send "${t.title}" back to pending — what needs to change?`, {
+            placeholder: 'Feedback for the assignee…', confirmLabel: 'Send back', required: true,
+        });
+        if (!note) return;
+        const res = await fetch(`/api/tasks/${t._id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'pending', revertNote: note }),
+        });
+        const data = await res.json();
+        if (!res.ok) return toast.error(data.error || 'Failed to send task back.');
+        toast.success('Sent back with feedback.');
         onChanged();
     }
 
@@ -833,7 +893,7 @@ function StageTaskBoard({ projectId, stageType, sectionId, users, tasks, onChang
                 <div className="mb-3 space-y-1.5">
                     {sorted.map((t) => (
                         <StageTaskRow
-                            key={t._id} task={t} onToggle={toggle} onDelete={del}
+                            key={t._id} task={t} user={user} onToggle={toggle} onApprove={approve} onRevert={revert} onDelete={del}
                             openProgress={openProgress} openSubtasks={openSubtasks} openEdit={openEdit}
                         />
                     ))}
@@ -852,7 +912,7 @@ function StageTaskBoard({ projectId, stageType, sectionId, users, tasks, onChang
     );
 }
 
-function DevelopmentStage({ projectId, section, users, tasks, onChanged, openProgress, openSubtasks, openEdit, uploadFiles, updateStageData }) {
+function DevelopmentStage({ projectId, section, users, user, tasks, onChanged, openProgress, openSubtasks, openEdit, uploadFiles, updateStageData }) {
     const { attachments } = section.data;
     return (
         <>
@@ -878,7 +938,7 @@ function DevelopmentStage({ projectId, section, users, tasks, onChanged, openPro
             </div>
             <label className="label">Task list</label>
             <StageTaskBoard
-                projectId={projectId} stageType="development" sectionId={section.id} users={users}
+                projectId={projectId} stageType="development" sectionId={section.id} users={users} user={user}
                 tasks={tasks} onChanged={onChanged} openProgress={openProgress} openSubtasks={openSubtasks}
                 openEdit={openEdit} uploadFiles={uploadFiles} addLabel="+ Add new task…"
             />
@@ -900,8 +960,8 @@ function ProductionStage({ section, uploadFiles, updateStageData }) {
         <>
             <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
                 <div>
-                    <label className="label">Printer name</label>
-                    <input className="input" value={data.printerName} onChange={(e) => updateStageData(section.id, { printerName: e.target.value })} />
+                    <label className="label">Printer</label>
+                    <PrinterPicker value={data.printerName} onChange={(v) => updateStageData(section.id, { printerName: v })} />
                 </div>
                 <div>
                     <label className="label">Final csv attach</label>
@@ -960,6 +1020,31 @@ function ProductionStage({ section, uploadFiles, updateStageData }) {
                         className="input" rows={3} placeholder="Any other printing instructions…"
                         value={data.otherInstructions}
                         onChange={(e) => updateStageData(section.id, { otherInstructions: e.target.value })}
+                    />
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 border-t border-line pt-4 sm:grid-cols-2">
+                <div>
+                    <div className="mb-2 flex items-center justify-between">
+                        <label className="label !mb-0">Mail receipt photo</label>
+                        <FileButton
+                            label={data.mailReceiptPhoto ? 'Replace' : 'Attach'}
+                            accept="image/*"
+                            onFiles={async (files) => {
+                                const uploaded = await uploadFiles(files);
+                                if (uploaded[0]) updateStageData(section.id, { mailReceiptPhoto: uploaded[0] });
+                            }}
+                        />
+                    </div>
+                    {data.mailReceiptPhoto && <a href={data.mailReceiptPhoto.url} target="_blank" rel="noreferrer" className="block truncate text-xs text-neutral-500 hover:underline">{data.mailReceiptPhoto.name}</a>}
+                </div>
+                <div>
+                    <label className="label">File shared link</label>
+                    <input
+                        className="input" placeholder="https://…"
+                        value={data.fileSharedLink ?? ''}
+                        onChange={(e) => updateStageData(section.id, { fileSharedLink: e.target.value })}
                     />
                 </div>
             </div>

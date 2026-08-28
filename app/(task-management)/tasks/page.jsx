@@ -6,14 +6,22 @@ import Modal from '@/components/Modal';
 import ProgressModal from '@/components/ProgressModal';
 import SubtaskModal from '@/components/SubtaskModal';
 import EmptyState from '@/components/EmptyState';
+import FileButton from '@/components/FileButton';
 import { TableSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
-import { confirmDialog } from '@/lib/confirm';
+import { confirmDialog, promptDialog } from '@/lib/confirm';
 import { getSession } from '@/lib/session';
 import { getReference } from '@/lib/referenceCache';
 import { getTeamSetting, setTeamSetting } from '@/lib/teamSettings';
+import { uploadFilesToR2 } from '@/lib/upload';
 import { colorFor } from '@/lib/colors';
-import { PRIORITY_META, PRIORITY_ORDER, priorityMeta, isOverdue, formatDate, pointsFor, DEPARTMENTS, departmentLabel } from '@/lib/taskDisplay';
+import { PRIORITY_META, PRIORITY_ORDER, priorityMeta, isOverdue, formatDate, pointsFor, DEPARTMENTS, departmentLabel, statusMeta, canManageTasks } from '@/lib/taskDisplay';
+
+const EMPTY_FORM = {
+    title: '', description: '', project: '', assignedTo: [],
+    trackProgress: false, unit: '', target: '', department: '',
+    priority: 'medium', dueDate: '', attachments: [],
+};
 
 // Empty string stands for "no product type set" on the task's project —
 // kept in the hidden-types list the same way the API's excludeProductTypes
@@ -37,11 +45,8 @@ function TasksInner() {
     const [settingsLoaded, setSettingsLoaded] = useState(false);
     const [open, setOpen] = useState(false);
     const [edit, setEdit] = useState(null);
-    const [form, setForm] = useState({
-        title: '', description: '', project: '', assignedTo: [],
-        trackProgress: false, unit: '', target: '', department: '',
-        priority: 'medium', dueDate: '',
-    });
+    const [form, setForm] = useState(EMPTY_FORM);
+    const [uploadError, setUploadError] = useState('');
     const [progressTask, setProgressTask] = useState(null);
     const [subtaskParent, setSubtaskParent] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -141,12 +146,24 @@ function TasksInner() {
 
     function openNew() {
         setEdit(null);
-        setForm({
-            title: '', description: '', project: projectFilter || '', assignedTo: [],
-            trackProgress: false, unit: '', target: '', department: '',
-            priority: 'medium', dueDate: '',
-        });
+        setUploadError('');
+        setForm({ ...EMPTY_FORM, project: projectFilter || '' });
         setOpen(true);
+    }
+
+    // Uploads go straight from the browser to R2 — our server only ever
+    // hands out a presigned URL, it never sees the file bytes.
+    async function uploadFiles(fileList) {
+        const files = Array.from(fileList || []);
+        if (!files.length) return [];
+        setUploadError('');
+        const { uploaded, errors } = await uploadFilesToR2(files);
+        if (errors.length) {
+            setUploadError(errors.map((e) => `${e.name}: ${e.message}`).join(' · '));
+            toast.error(errors.length === files.length ? 'Upload failed.' : 'Some files failed to upload.');
+        }
+        if (uploaded.length) toast.success(uploaded.length > 1 ? `${uploaded.length} files uploaded.` : 'File uploaded.');
+        return uploaded;
     }
 
     async function save() {
@@ -168,12 +185,44 @@ function TasksInner() {
         }
     }
 
-    async function toggle(t) {
-        await fetch(`/api/tasks/${t._id}`, {
+    // Team members freely toggle pending <-> done themselves. Once a lead
+    // has approved a task (completed), it's locked here — only Revert
+    // (below) can move it, and that's lead/head-only server-side too.
+    async function toggleDone(t) {
+        if (t.status === 'completed') return;
+        const next = t.status === 'pending' ? 'done' : 'pending';
+        const res = await fetch(`/api/tasks/${t._id}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: t.status === 'pending' ? 'completed' : 'pending' }),
+            body: JSON.stringify({ status: next }),
         });
-        toast.success(t.status === 'pending' ? 'Task marked complete.' : 'Task reopened.');
+        if (!res.ok) return toast.error('Failed to update task.');
+        toast.success(next === 'done' ? 'Marked done.' : 'Reopened.');
+        load();
+    }
+
+    async function approve(t) {
+        const res = await fetch(`/api/tasks/${t._id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'completed' }),
+        });
+        const data = await res.json();
+        if (!res.ok) return toast.error(data.error || 'Failed to complete task.');
+        toast.success('Task marked complete.');
+        load();
+    }
+
+    async function revert(t) {
+        const note = await promptDialog(`Send "${t.title}" back to pending — what needs to change?`, {
+            placeholder: 'Feedback for the assignee…', confirmLabel: 'Send back', required: true,
+        });
+        if (!note) return;
+        const res = await fetch(`/api/tasks/${t._id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'pending', revertNote: note }),
+        });
+        const data = await res.json();
+        if (!res.ok) return toast.error(data.error || 'Failed to send task back.');
+        toast.success('Sent back with feedback.');
         load();
     }
 
@@ -195,11 +244,8 @@ function TasksInner() {
     function closeModal() {
         setOpen(false);
         setEdit(null);
-        setForm({
-            title: '', description: '', project: projectFilter || '', assignedTo: [],
-            trackProgress: false, unit: '', target: '', department: '',
-            priority: 'medium', dueDate: '',
-        });
+        setUploadError('');
+        setForm({ ...EMPTY_FORM, project: projectFilter || '' });
     }
 
     const typeOptions = useMemo(
@@ -210,6 +256,7 @@ function TasksInner() {
     // team-members still see the resulting (lead-set) filtered list, just
     // without a UI to change it. See app/api/settings/route.js.
     const canEditTypes = user?.role === 'lead' || user?.role === 'head';
+    const isManager = canManageTasks(user);
 
     // Status/priority/assignee are already applied server-side — this just orders the current page.
     const rows = useMemo(() => {
@@ -246,6 +293,7 @@ function TasksInner() {
             <div className="mb-4 flex flex-wrap items-center gap-2">
                 <select className="input w-auto" value={status} onChange={(e) => setStatus(e.target.value)}>
                     <option value="active">Active</option>
+                    <option value="done">Done — awaiting review</option>
                     <option value="completed">Completed</option>
                     <option value="all">All status</option>
                 </select>
@@ -349,17 +397,26 @@ function TasksInner() {
                                             )}
                                         </div>
                                     ) : (
-                                        <span className={`rounded-full px-2.5 py-1 text-xs ${t.status === 'completed' ? 'bg-green-500/15 text-green-400' : 'bg-neutral-500/15 text-neutral-500'
-                                            }`}>
-                                            {t.status}
-                                        </span>
+                                        <input
+                                            type="checkbox"
+                                            className="h-[18px] w-[18px] accent-neutral-900 dark:accent-white disabled:opacity-40"
+                                            checked={t.status !== 'pending'}
+                                            disabled={t.status === 'completed'}
+                                            onChange={() => toggleDone(t)}
+                                            title={t.status === 'completed' ? 'Completed — a lead can revert it' : 'Mark done'}
+                                        />
                                     )}
                                 </td>
 
                                 <td className="px-4 py-3">
-                                    <span className={t.status === 'completed' ? 'text-neutral-500 line-through' : 'font-medium'}>
+                                    <span className={t.status !== 'pending' ? 'text-neutral-500 line-through' : 'font-medium'}>
                                         {t.title}
                                     </span>
+                                    {t.status === 'pending' && t.revertNote && (
+                                        <p className="mt-0.5 truncate text-xs text-amber-500" title={t.revertNote.text}>
+                                            ⚠ {t.revertNote.byName}: {t.revertNote.text}
+                                        </p>
+                                    )}
                                 </td>
                                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
                                     {t.project?.name || '—'}
@@ -388,11 +445,8 @@ function TasksInner() {
                                 <td className="px-4 py-3 text-neutral-500">{t.createdBy?.name || '—'}</td>
                                 <td className="px-4 py-3">
                                     <div className="flex items-center gap-1.5">
-                                        <span className={`rounded-full px-2.5 py-1 text-xs ${t.status === 'completed'
-                                            ? 'bg-green-500/15 text-green-400'
-                                            : 'bg-neutral-500/15 text-neutral-500'
-                                            }`}>
-                                            {t.status}
+                                        <span className={`rounded-full px-2.5 py-1 text-xs ${statusMeta(t.status).className}`}>
+                                            {statusMeta(t.status).label}
                                         </span>
                                         {t.status === 'completed' && (
                                             <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">+{pointsFor(t)} pts</span>
@@ -400,9 +454,13 @@ function TasksInner() {
                                     </div>
                                 </td>
                                 <td className="px-4 py-3">
-                                    <div className="flex justify-end gap-2">
-                                        <input type="checkbox" className="mt-1.5 mr-4 h-[18px] w-[18px] accent-neutral-900 dark:accent-white"
-                                            checked={t.status === 'completed'} onChange={() => toggle(t)} />
+                                    <div className="flex flex-wrap justify-end gap-2">
+                                        {isManager && t.status === 'done' && (
+                                            <button className="btn-ghost !px-3 !py-1.5 !text-xs !text-green-500" onClick={() => approve(t)}>✓ Complete</button>
+                                        )}
+                                        {isManager && (t.status === 'done' || t.status === 'completed') && (
+                                            <button className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={() => revert(t)}>↩ Revert</button>
+                                        )}
                                         <button
                                             className="btn-ghost !px-3 !py-1.5 !text-xs"
                                             onClick={() => setSubtaskParent(t)}
@@ -413,6 +471,7 @@ function TasksInner() {
                                             className="btn-ghost !px-3 !py-1.5 !text-xs"
                                             onClick={() => {
                                                 setEdit(t._id);
+                                                setUploadError('');
                                                 setForm({
                                                     title: t.title,
                                                     description: t.description || '',
@@ -424,6 +483,7 @@ function TasksInner() {
                                                     department: t.department || '',
                                                     priority: t.priority || 'medium',
                                                     dueDate: t.dueDate ? String(t.dueDate).slice(0, 10) : '',
+                                                    attachments: t.attachments || [],
                                                 });
                                                 setOpen(true);
                                             }}
@@ -524,6 +584,35 @@ function TasksInner() {
                             </button>
                         ))}
                     </div>
+                </div>
+                <div className="mb-5">
+                    <div className="mb-2 flex items-center justify-between">
+                        <label className="label !mb-0">Attachments</label>
+                        <FileButton
+                            label="Attach files"
+                            multiple
+                            onFiles={async (files) => {
+                                const uploaded = await uploadFiles(files);
+                                if (uploaded.length) setForm((f) => ({ ...f, attachments: [...f.attachments, ...uploaded] }));
+                            }}
+                        />
+                    </div>
+                    {uploadError && (
+                        <p className="mb-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{uploadError}</p>
+                    )}
+                    {form.attachments.length > 0 && (
+                        <ul className="space-y-1">
+                            {form.attachments.map((a, i) => (
+                                <li key={i} className="flex items-center justify-between gap-2 text-sm">
+                                    <a href={a.url} target="_blank" rel="noreferrer" className="truncate text-neutral-700 hover:underline dark:text-neutral-300">{a.name}</a>
+                                    <button
+                                        className="shrink-0 text-xs text-neutral-500 hover:text-red-400"
+                                        onClick={() => setForm((f) => ({ ...f, attachments: f.attachments.filter((_, idx) => idx !== i) }))}
+                                    >✕</button>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
                 </div>
                 <button className="btn-primary w-full" onClick={save} disabled={saving}>
                     {saving ? 'Saving…' : 'Save'}

@@ -17,7 +17,6 @@ export async function PUT(req, { params }) {
     const set = { updatedAt: new Date() };
     if (body.title !== undefined) set.title = body.title;
     if (body.description !== undefined) set.description = body.description;
-    if (body.status !== undefined) set.status = body.status;
     if (body.project !== undefined) set.project = body.project ? oid(body.project) : null;
     if (body.assignedTo !== undefined) set.assignedTo = body.assignedTo.map(oid);
     if (body.trackProgress !== undefined) set.trackProgress = !!body.trackProgress;
@@ -30,15 +29,54 @@ export async function PUT(req, { params }) {
     if (body.stageType !== undefined) set.stageType = body.stageType || null;
     if (body.stageId !== undefined) set.stageId = body.stageId || null;
     if (body.attachments !== undefined) set.attachments = body.attachments;
-    if (body.status !== undefined) set.completedAt = body.status === 'completed' ? new Date() : null;
+
+    // Status: team members move a top-level task freely between pending and
+    // done. Only a lead/head can promote it to completed, or move it *out*
+    // of completed again — subtasks (have a parentTask) skip all of this
+    // and keep the simple pending/completed toggle they always had.
+    let statusEvent = null;
+    if (body.status !== undefined) {
+        const validStatuses = ['pending', 'done', 'completed'];
+        if (!validStatuses.includes(body.status)) {
+            return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
+        }
+        const isManager = session.role === 'lead' || session.role === 'head';
+        const isSubtask = !!existing.parentTask;
+        if (!isSubtask) {
+            if (body.status === 'completed' && !isManager) {
+                return NextResponse.json({ error: 'Only a lead can mark a task complete.' }, { status: 403 });
+            }
+            if (existing.status === 'completed' && body.status !== 'completed' && !isManager) {
+                return NextResponse.json({ error: 'Only a lead can reopen a completed task.' }, { status: 403 });
+            }
+        }
+
+        set.status = body.status;
+        set.completedAt = body.status === 'completed' ? new Date() : null;
+
+        if (body.status !== 'pending') {
+            set.revertNote = null; // moving forward clears any stale feedback
+        } else if (body.revertNote) {
+            set.revertNote = { text: body.revertNote, by: session.id, byName: session.name, at: new Date() };
+        } else if (body.revertNote === '') {
+            set.revertNote = null;
+        }
+
+        if (body.status !== existing.status && !isSubtask) {
+            if (body.status === 'done') statusEvent = { type: 'task.done', verb: 'marked done on' };
+            else if (body.status === 'completed') statusEvent = { type: 'task.completed', verb: 'approved' };
+            else if (body.revertNote) statusEvent = { type: 'task.reverted', verb: `sent back (${body.revertNote}) to pending` };
+            else statusEvent = { type: 'task.reopened', verb: 'reopened' };
+        }
+    }
 
     await db.collection('tasks').updateOne({ _id: oid(id) }, { $set: set });
     const task = await db.collection('tasks').findOne({ _id: oid(id) });
 
-    if (set.status && set.status !== existing.status && !existing.parentTask) {
+    if (statusEvent) {
         await logActivity(db, {
-            type: set.status === 'completed' ? 'task.completed' : 'task.reopened',
-            message: `${session.name} ${set.status === 'completed' ? 'completed' : 'reopened'} task "${task.title}"`,
+            type: statusEvent.type,
+            message: `${session.name} ${statusEvent.verb} task "${task.title}"`,
             project: task.project,
             task: task._id,
             user: session.id,

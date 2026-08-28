@@ -85,7 +85,7 @@ export default function SubtaskModal({ task, users, open, onClose, onChange }) {
     const done = subs.filter((s) => s.status === 'completed').length;
 
     return (
-        <Modal open={open} onClose={onClose} title={`Subtasks · ${task.title}`}>
+        <Modal open={open} onClose={onClose} title={`Subtasks · ${task.title}`} resizable>
             <p className="mb-4 text-sm text-neutral-500">{done} / {subs.length} completed</p>
 
             {/* Add */}
@@ -107,7 +107,10 @@ export default function SubtaskModal({ task, users, open, onClose, onChange }) {
             </div>
 
             {/* List */}
-            <div className="max-h-64 overflow-y-auto">
+            {/* No fixed height here — the modal itself is resizable and
+                scrolls (see Modal's `resizable` prop), so the list just
+                grows with it instead of capping at its own height. */}
+            <div>
                 {subs.length === 0 && <p className="py-4 text-center text-neutral-500">No subtasks yet.</p>}
                 {subs.map((s) => (
                     editId === s._id ? (
