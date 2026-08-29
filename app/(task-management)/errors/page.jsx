@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
+import Shell from "@/components/Shell";
+import { getSession } from "@/lib/session";
 import {
   FaBug,
   FaClock,
@@ -91,7 +94,8 @@ const Styles = () => (
 );
 
 /* =================================================================
-   UI atoms — monochrome, lifted surfaces + white accents
+   UI atoms — themed to the app's light/dark tokens (bg-panel,
+   bg-panel2, border-line, --accent) instead of a fixed dark palette.
 ================================================================= */
 const Button = ({
   children,
@@ -103,14 +107,15 @@ const Button = ({
   ...props
 }) => {
   const base =
-    "inline-flex items-center justify-center font-medium rounded-md transition-all duration-150 focus:outline-none focus:ring-1 focus:ring-white/40 disabled:opacity-30 disabled:cursor-not-allowed select-none active:scale-[.97]";
+    "inline-flex items-center justify-center font-medium rounded-md transition-all duration-150 focus:outline-none focus:ring-1 focus:ring-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed select-none active:scale-[.97]";
   const variants = {
     default:
-      "bg-neutral-800 text-neutral-100 border border-white/10 hover:bg-neutral-700 hover:border-white/20",
-    solid: "bg-white text-black hover:bg-neutral-200",
-    ghost: "text-neutral-400 hover:text-white hover:bg-white/5",
+      "bg-panel2 border border-line text-[var(--fg)] hover:bg-line/60",
+    solid:
+      "bg-gradient-to-br from-[var(--accent)] to-[var(--accent-2)] text-[var(--accent-fg-on)] hover:opacity-90",
+    ghost: "text-neutral-500 hover:text-[var(--fg)] hover:bg-panel2",
     danger:
-      "bg-neutral-800 text-neutral-200 border border-white/10 hover:bg-neutral-700 hover:text-white",
+      "bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/15",
   };
   const sizes = {
     xs: "px-2 py-1 text-[11px] gap-1",
@@ -119,7 +124,7 @@ const Button = ({
   };
   return (
     <button
-      className={`${base} ${variants[variant]} ${sizes[size]} ${active ? "!bg-white !text-black" : ""
+      className={`${base} ${variants[variant]} ${sizes[size]} ${active ? "!bg-neutral-900 !text-white dark:!bg-white dark:!text-black" : ""
         } ${className}`}
       disabled={disabled}
       {...props}
@@ -131,7 +136,7 @@ const Button = ({
 
 const Pill = ({ children, className = "" }) => (
   <span
-    className={`inline-flex items-center px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider rounded border border-white/15 text-neutral-300 ${className}`}
+    className={`inline-flex items-center px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider rounded border border-line text-neutral-500 ${className}`}
   >
     {children}
   </span>
@@ -146,8 +151,8 @@ const Check = ({ checked, onChange, onClick }) => (
       onChange?.();
     }}
     className={`h-4 w-4 shrink-0 rounded border flex items-center justify-center transition-all ${checked
-      ? "bg-white border-white text-black"
-      : "border-neutral-500 hover:border-white"
+      ? "bg-neutral-900 border-neutral-900 text-white dark:bg-white dark:border-white dark:text-black"
+      : "border-line hover:border-neutral-400 dark:hover:border-neutral-500"
       }`}
   >
     {checked && <FaCheck className="text-[8px]" />}
@@ -159,29 +164,29 @@ const Check = ({ checked, onChange, onClick }) => (
 ================================================================= */
 const StatCard = ({ label, value, icon: Icon, delay = 0 }) => (
   <div
-    className="et-in bg-neutral-900 border border-white/10 rounded-lg p-2.5 flex items-center justify-between gap-2"
+    className="et-in card !p-2.5 flex items-center justify-between gap-2"
     style={{ animationDelay: `${delay}ms` }}
   >
     <div className="min-w-0">
       <p className="text-[10px] uppercase tracking-widest text-neutral-500">
         {label}
       </p>
-      <p className="text-xl font-mono font-semibold text-white tabular-nums leading-tight">
+      <p className="text-xl font-mono font-semibold text-neutral-900 dark:text-neutral-100 tabular-nums leading-tight">
         {value}
       </p>
     </div>
-    <div className="p-1.5 rounded-md bg-white/5 border border-white/10 text-neutral-300">
+    <div className="p-1.5 rounded-md bg-[var(--accent-soft)] text-[var(--accent)]">
       <Icon className="text-xs" />
     </div>
   </div>
 );
 
 /* =================================================================
-   Charts (monochrome, compact)
+   Charts
 ================================================================= */
 const ChartShell = ({ title, children, delay = 0 }) => (
   <div
-    className="et-in bg-neutral-900 border border-white/10 rounded-lg p-2.5"
+    className="et-in card !p-2.5"
     style={{ animationDelay: `${delay}ms` }}
   >
     <h3 className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1.5">
@@ -192,11 +197,11 @@ const ChartShell = ({ title, children, delay = 0 }) => (
 );
 
 const tooltipStyle = {
-  background: "#171717",
-  border: "1px solid rgba(255,255,255,.15)",
+  background: "var(--color-panel)",
+  border: "1px solid var(--color-line)",
   borderRadius: 8,
   fontSize: 12,
-  color: "#fff",
+  color: "var(--fg)",
 };
 
 const TimeChart = ({ data, delay }) => (
@@ -208,30 +213,30 @@ const TimeChart = ({ data, delay }) => (
       >
         <defs>
           <linearGradient id="etGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#fff" stopOpacity={0.4} />
-            <stop offset="100%" stopColor="#fff" stopOpacity={0} />
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.35} />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
           </linearGradient>
         </defs>
-        <CartesianGrid stroke="rgba(255,255,255,.06)" vertical={false} />
+        <CartesianGrid stroke="var(--color-line)" vertical={false} />
         <XAxis
           dataKey="label"
-          tick={{ fill: "#737373", fontSize: 9 }}
-          axisLine={{ stroke: "rgba(255,255,255,.1)" }}
+          tick={{ fill: "var(--fg-placeholder)", fontSize: 9 }}
+          axisLine={{ stroke: "var(--color-line)" }}
           tickLine={false}
           interval="preserveStartEnd"
         />
         <YAxis
-          tick={{ fill: "#737373", fontSize: 9 }}
+          tick={{ fill: "var(--fg-placeholder)", fontSize: 9 }}
           axisLine={false}
           tickLine={false}
           allowDecimals={false}
           width={28}
         />
-        <Tooltip contentStyle={tooltipStyle} cursor={{ stroke: "#525252" }} />
+        <Tooltip contentStyle={tooltipStyle} cursor={{ stroke: "var(--color-line)" }} />
         <Area
           type="monotone"
           dataKey="count"
-          stroke="#fff"
+          stroke="var(--accent)"
           strokeWidth={1.5}
           fill="url(#etGrad)"
           animationDuration={600}
@@ -254,17 +259,17 @@ const BarBlock = ({ title, data, delay }) => (
           type="category"
           dataKey="name"
           width={88}
-          tick={{ fill: "#a3a3a3", fontSize: 10 }}
+          tick={{ fill: "var(--fg-placeholder)", fontSize: 10 }}
           axisLine={false}
           tickLine={false}
         />
         <Tooltip
           contentStyle={tooltipStyle}
-          cursor={{ fill: "rgba(255,255,255,.05)" }}
+          cursor={{ fill: "var(--color-panel2)" }}
         />
         <Bar
           dataKey="count"
-          fill="#fafafa"
+          fill="var(--accent)"
           radius={[0, 3, 3, 0]}
           barSize={12}
           animationDuration={600}
@@ -280,7 +285,7 @@ const BarBlock = ({ title, data, delay }) => (
 const ErrorRow = ({ error, onView, onDelete, isSelected, onToggle }) => {
   const checked = isSelected?.(error._id) || false;
   return (
-    <div className="group flex items-start gap-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-white/10 hover:bg-white/[.03] transition-colors">
+    <div className="group flex items-start gap-3 px-3 py-2.5 rounded-lg border border-transparent hover:border-line hover:bg-panel2/60 transition-colors">
       <div className="pt-0.5">
         <Check
           checked={checked}
@@ -293,7 +298,7 @@ const ErrorRow = ({ error, onView, onDelete, isSelected, onToggle }) => {
         onClick={() => onView(error)}
       >
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-sm font-medium text-white truncate">
+          <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">
             {error.error?.name}
           </span>
           {error.status && error.status !== "pending" && (
@@ -305,16 +310,16 @@ const ErrorRow = ({ error, onView, onDelete, isSelected, onToggle }) => {
         </p>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-neutral-500 font-mono">
           <span className="flex items-center gap-1">
-            <FaClock className="text-neutral-600" />
+            <FaClock className="text-neutral-400 dark:text-neutral-600" />
             {fmtDateTime(error.timestamp)}
           </span>
           <span className="flex items-center gap-1">
-            <FaLaptop className="text-neutral-600" />
+            <FaLaptop className="text-neutral-400 dark:text-neutral-600" />
             {error.deviceInfo?.browser || "Unknown"}
           </span>
           {error.deviceInfo?.employeeDetails?.name && (
             <span className="flex items-center gap-1">
-              <FaUser className="text-neutral-600" />
+              <FaUser className="text-neutral-400 dark:text-neutral-600" />
               {error.deviceInfo.employeeDetails.name}
             </span>
           )}
@@ -325,7 +330,7 @@ const ErrorRow = ({ error, onView, onDelete, isSelected, onToggle }) => {
           e.stopPropagation();
           onDelete(error._id);
         }}
-        className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md text-neutral-400 hover:text-white hover:bg-white/10"
+        className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md text-neutral-500 hover:text-red-500 hover:bg-red-500/10"
         aria-label="Delete"
       >
         <IoClose />
@@ -358,11 +363,11 @@ const GroupCard = ({
 
   return (
     <div
-      className="et-in bg-neutral-900 border border-white/10 rounded-xl overflow-hidden"
+      className="et-in card !p-0 overflow-hidden"
       style={{ animationDelay: `${delay}ms` }}
     >
       <div
-        className="flex items-center gap-3 px-3.5 py-3 cursor-pointer hover:bg-white/[.04] transition-colors"
+        className="flex items-center gap-3 px-3.5 py-3 cursor-pointer hover:bg-panel2/60 transition-colors"
         onClick={() => setOpen(!open)}
       >
         <Check
@@ -376,25 +381,25 @@ const GroupCard = ({
               });
           }}
         />
-        <div className="p-1.5 rounded-md bg-white/5 border border-white/10 text-neutral-200">
+        <div className="p-1.5 rounded-md bg-[var(--accent-soft)] text-[var(--accent)]">
           <Icon className="text-xs" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-white truncate">
+            <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">
               {group.label}
             </h3>
-            <Pill className="!text-white !border-white/30">
+            <Pill className="!text-neutral-700 dark:!text-neutral-300 !border-neutral-400/40">
               {errors.length}
             </Pill>
           </div>
           <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-neutral-500 font-mono mt-0.5">
             <span className="flex items-center gap-1">
-              <FaUsers className="text-neutral-600" />
+              <FaUsers className="text-neutral-400 dark:text-neutral-600" />
               {uniqEmployees} emp
             </span>
             <span className="flex items-center gap-1">
-              <FaBug className="text-neutral-600" />
+              <FaBug className="text-neutral-400 dark:text-neutral-600" />
               {uniqTypes} types
             </span>
             <span className="hidden sm:inline">
@@ -409,7 +414,7 @@ const GroupCard = ({
       </div>
 
       {open && (
-        <div className="et-expand border-t border-white/10 p-2 space-y-1">
+        <div className="et-expand border-t border-line p-2 space-y-1">
           {errors.map((error) => (
             <ErrorRow
               key={error._id}
@@ -433,15 +438,13 @@ const DetailRow = ({ label, value }) =>
   value ? (
     <div className="flex gap-2 text-xs py-0.5">
       <span className="text-neutral-500 w-24 shrink-0">{label}</span>
-      <span className="text-neutral-100 break-all">{value}</span>
+      <span className="text-neutral-800 dark:text-neutral-100 break-all">{value}</span>
     </div>
   ) : null;
 
 const Section = ({ title, icon: Icon, children, className = "" }) => (
-  <div
-    className={`bg-neutral-900 border border-white/10 rounded-xl p-4 ${className}`}
-  >
-    <h3 className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-neutral-400 mb-3">
+  <div className={`card ${className}`}>
+    <h3 className="flex items-center gap-2 text-[11px] uppercase tracking-widest text-neutral-500 mb-3">
       <Icon className="text-xs" /> {title}
     </h3>
     <div className="space-y-1">{children}</div>
@@ -455,52 +458,41 @@ const ErrorDetail = ({ error, loading, onBack, onResolve, onReject }) => {
   const mappedStack = error.mappedStack || [];
 
   return (
-    <div className="min-h-screen bg-black text-neutral-200 antialiased">
-
+    <div className="et-in">
       <Styles />
-      <header className="sticky top-0 z-30 bg-black/90 backdrop-blur border-b border-white/10">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          <Button variant="default" size="sm" onClick={onBack}>
-            <FaChevronLeft className="text-[10px]" /> Back
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <Button variant="default" size="sm" onClick={onBack}>
+          <FaChevronLeft className="text-[10px]" /> Back
+        </Button>
+        <div className="flex items-center gap-2">
+          {loading && (
+            <span className="flex items-center gap-1.5 text-[11px] text-neutral-500 font-mono">
+              <IoRefresh className="animate-spin" /> loading details…
+            </span>
+          )}
+          <Button variant="solid" size="sm" onClick={() => onResolve(error._id)}>
+            <FaCheck /> Resolve
           </Button>
-          <div className="flex items-center gap-2">
-            {loading && (
-              <span className="flex items-center gap-1.5 text-[11px] text-neutral-500 font-mono">
-                <IoRefresh className="animate-spin" /> loading details…
-              </span>
-            )}
-            <Button
-              variant="solid"
-              size="sm"
-              onClick={() => onResolve(error._id)}
-            >
-              <FaCheck /> Resolve
-            </Button>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => onReject(error._id)}
-            >
-              <FaTimes /> Reject
-            </Button>
-          </div>
+          <Button variant="danger" size="sm" onClick={() => onReject(error._id)}>
+            <FaTimes /> Reject
+          </Button>
         </div>
-      </header>
+      </div>
 
-      <main className="max-w-5xl mx-auto px-4 py-5 space-y-4 et-in">
+      <div className="space-y-4">
         {/* Title */}
-        <div className="bg-neutral-900 border border-white/10 rounded-xl p-4">
+        <div className="card">
           <div className="flex items-center gap-2 mb-3">
-            <FaExclamationTriangle className="text-neutral-300" />
-            <h1 className="text-xl font-bold text-white">
+            <FaExclamationTriangle className="text-neutral-500" />
+            <h1 className="text-xl font-bold text-neutral-900 dark:text-neutral-100">
               {error.error?.name}
             </h1>
             {error.status && error.status !== "pending" && (
               <Pill>{error.status}</Pill>
             )}
           </div>
-          <div className="bg-black border border-white/10 rounded-lg p-3">
-            <p className="text-sm text-neutral-100">{error.error?.message}</p>
+          <div className="bg-panel2 border border-line rounded-lg p-3">
+            <p className="text-sm text-neutral-800 dark:text-neutral-100">{error.error?.message}</p>
           </div>
         </div>
 
@@ -551,7 +543,7 @@ const ErrorDetail = ({ error, loading, onBack, onResolve, onReject }) => {
             <img
               src={error.screenshot}
               alt="Error screenshot"
-              className="w-full rounded-lg border border-white/10"
+              className="w-full rounded-lg border border-line"
             />
           </Section>
         )}
@@ -562,18 +554,18 @@ const ErrorDetail = ({ error, loading, onBack, onResolve, onReject }) => {
             <div className="space-y-3">
               {mappedStack.map((frame, i) =>
                 frame.separator ? (
-                  <div key={i} className="border-t border-white/10 my-2" />
+                  <div key={i} className="border-t border-line my-2" />
                 ) : (
                   <div key={i} className="text-xs font-mono">
                     {frame.function && (
-                      <div className="text-neutral-300 mb-1">
+                      <div className="text-neutral-600 dark:text-neutral-300 mb-1">
                         at {frame.function}
                         {frame.source &&
                           ` (${frame.source}:${frame.line}:${frame.column})`}
                       </div>
                     )}
                     {frame.snippet && (
-                      <pre className="text-neutral-100 bg-black border border-white/10 p-3 rounded-md whitespace-pre-wrap break-all">
+                      <pre className="text-neutral-800 dark:text-neutral-100 bg-panel2 border border-line p-3 rounded-md whitespace-pre-wrap break-all">
                         {frame.snippet}
                       </pre>
                     )}
@@ -582,12 +574,12 @@ const ErrorDetail = ({ error, loading, onBack, onResolve, onReject }) => {
               )}
             </div>
           ) : (
-            <pre className="text-[12px] leading-relaxed text-neutral-200 font-mono whitespace-pre-wrap break-all bg-black border border-white/10 rounded-lg p-3">
+            <pre className="text-[12px] leading-relaxed text-neutral-800 dark:text-neutral-200 font-mono whitespace-pre-wrap break-all bg-panel2 border border-line rounded-lg p-3">
               {error.error?.stack || "No stack available"}
             </pre>
           )}
         </Section>
-      </main>
+      </div>
     </div>
   );
 };
@@ -604,32 +596,32 @@ const DeleteAllModal = ({ open, onClose, onConfirm, total, deleting }) => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm et-in"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm et-in p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm mx-4 bg-neutral-900 border border-white/10 rounded-xl p-5 et-slide"
+        className="card w-full max-w-sm et-slide"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 mb-3">
-          <div className="p-1.5 rounded-md bg-white/5 border border-white/10 text-neutral-200">
+          <div className="p-1.5 rounded-md bg-red-500/10 text-red-500">
             <FaExclamationTriangle className="text-xs" />
           </div>
-          <h3 className="text-sm font-semibold text-white">Delete all errors</h3>
+          <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Delete all errors</h3>
         </div>
 
-        <p className="text-xs text-neutral-400 leading-relaxed mb-3">
+        <p className="text-xs text-neutral-500 leading-relaxed mb-3">
           This permanently deletes{" "}
-          <span className="text-white font-mono">{total}</span> record
+          <span className="text-neutral-800 dark:text-neutral-100 font-mono">{total}</span> record
           {total === 1 ? "" : "s"} across every project. This cannot be undone.
-          Type <span className="text-white font-mono">DELETE</span> to confirm.
+          Type <span className="text-neutral-800 dark:text-neutral-100 font-mono">DELETE</span> to confirm.
         </p>
 
         <input
           value={confirmText}
           onChange={(e) => setConfirmText(e.target.value)}
           placeholder="DELETE"
-          className="w-full px-3 py-2 bg-neutral-800 border border-white/10 rounded-md text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-white/40 font-mono"
+          className="input font-mono"
         />
 
         <div className="flex items-center justify-end gap-2 mt-5">
@@ -662,6 +654,15 @@ const DeleteAllModal = ({ open, onClose, onConfirm, total, deleting }) => {
    Main dashboard
 ================================================================= */
 export default function ErrorTrackingDashboard() {
+  const router = useRouter();
+  const [user, setUser] = useState(null);
+  useEffect(() => {
+    getSession().then((me) => {
+      if (!me) router.push("/login");
+      else setUser(me);
+    });
+  }, [router]);
+
   // server-driven data
   const [errors, setErrors] = useState([]); // current page rows
   const [analytics, setAnalytics] = useState(null); // full-DB aggregates
@@ -847,25 +848,22 @@ export default function ErrorTrackingDashboard() {
 
     if (!open) return null;
 
-    const selectClass =
-      "w-full bg-neutral-800 border border-white/10 rounded-md px-2.5 py-2 text-sm text-neutral-100 focus:outline-none focus:border-white/40 hover:border-white/25 transition-colors";
-
     return (
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm et-in"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm et-in p-4"
         onClick={onClose}
       >
         <div
-          className="w-full max-w-sm mx-4 bg-neutral-900 border border-white/10 rounded-xl p-5 et-slide"
+          className="card w-full max-w-sm et-slide"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between mb-4">
-            <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
-              <FaFileExcel className="text-neutral-300" /> Export to Excel
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+              <FaFileExcel className="text-[var(--accent)]" /> Export to Excel
             </h3>
             <button
               onClick={onClose}
-              className="p-1 rounded-md text-neutral-400 hover:text-white hover:bg-white/10"
+              className="p-1 rounded-md text-neutral-500 hover:text-[var(--fg)] hover:bg-panel2"
             >
               <IoClose />
             </button>
@@ -873,13 +871,11 @@ export default function ErrorTrackingDashboard() {
 
           <div className="space-y-3">
             <div>
-              <label className="block text-[10px] uppercase tracking-widest text-neutral-500 mb-1.5">
-                Project
-              </label>
+              <label className="label">Project</label>
               <select
                 value={proj}
                 onChange={(e) => setProj(e.target.value)}
-                className={selectClass}
+                className="input"
               >
                 <option value="">All projects</option>
                 {projectOptions.map((p) => (
@@ -891,13 +887,11 @@ export default function ErrorTrackingDashboard() {
             </div>
 
             <div>
-              <label className="block text-[10px] uppercase tracking-widest text-neutral-500 mb-1.5">
-                Date range
-              </label>
+              <label className="label">Date range</label>
               <select
                 value={range}
                 onChange={(e) => setRange(e.target.value)}
-                className={selectClass}
+                className="input"
               >
                 <option value="">All time</option>
                 <option value="today">Today</option>
@@ -1189,29 +1183,30 @@ export default function ErrorTrackingDashboard() {
     groupBy
   ];
 
-  const selectClass =
-    "bg-neutral-800 border border-white/10 rounded-md px-2.5 py-1.5 text-xs text-neutral-100 focus:outline-none focus:border-white/40 hover:border-white/25 transition-colors";
-
   const totalInDb = analytics?.totalErrors ?? pageInfo.total;
   const totalPages = pageInfo.totalPages;
   const safePage = Math.min(page, totalPages);
 
+  if (!user) return null; // auth check still resolving
+
   /* ---------- full-page detail ---------- */
   if (selectedError) {
     return (
-      <ErrorDetail
-        error={selectedError}
-        loading={detailLoading}
-        onBack={() => setSelectedError(null)}
-        onResolve={(id) => {
-          updateStatus(id, "resolved");
-          setSelectedError(null);
-        }}
-        onReject={(id) => {
-          updateStatus(id, "rejected");
-          setSelectedError(null);
-        }}
-      />
+      <Shell user={user}>
+        <ErrorDetail
+          error={selectedError}
+          loading={detailLoading}
+          onBack={() => setSelectedError(null)}
+          onResolve={(id) => {
+            updateStatus(id, "resolved");
+            setSelectedError(null);
+          }}
+          onReject={(id) => {
+            updateStatus(id, "rejected");
+            setSelectedError(null);
+          }}
+        />
+      </Shell>
     );
   }
 
@@ -1219,7 +1214,7 @@ export default function ErrorTrackingDashboard() {
      Render dashboard
   ================================================================= */
   return (
-    <div className="min-h-screen bg-black text-neutral-200 antialiased">
+    <Shell user={user}>
       <Styles />
       <ExportModal
         open={exportOpen}
@@ -1236,67 +1231,61 @@ export default function ErrorTrackingDashboard() {
         total={totalInDb}
         deleting={deletingAll}
       />
+
       {/* ---------- Header ---------- */}
-      <header className="sticky top-0 z-30 bg-black/90 backdrop-blur border-b border-white/10">
-        <div className="max-w-7xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="p-1.5 rounded-lg bg-white text-black">
-              <FaBug className="text-sm" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-sm font-semibold text-white tracking-tight leading-none">
-                Error Tracker
-              </h1>
-              <p className="text-[10px] text-neutral-500 hidden sm:block mt-0.5">
-                Monitor &amp; resolve application errors
-              </p>
-            </div>
-            <span className="ml-1.5 px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-[11px] font-mono text-neutral-200">
-              {totalInDb} total
-            </span>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="p-1.5 rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]">
+            <FaBug className="text-sm" />
           </div>
-          <div className="flex items-center gap-1.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              active={autoRefresh}
-              onClick={() => setAutoRefresh((v) => !v)}
-            >
-              {autoRefresh ? <FaPause /> : <FaPlay />}
-              <span className="hidden sm:inline">
-                {autoRefresh ? "Pause" : "Live"}
-              </span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => fetchAll(true)}
-              disabled={refreshing}
-            >
-              <IoRefresh className={refreshing ? "animate-spin" : ""} />
-              <span className="hidden sm:inline">Refresh</span>
-            </Button>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold sm:text-3xl">Errors</h1>
+            <p className="text-xs text-neutral-500 hidden sm:block mt-0.5">
+              Monitor &amp; resolve application errors
+            </p>
           </div>
-          <div className="space-x-2">
-
-            <Button variant="ghost" size="sm" className="border border-gray-700" onClick={() => setExportOpen(true)}>
-              <FaFileExcel />
-              <span className="hidden sm:inline">Export</span>
-            </Button>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setDeleteAllOpen(true)}
-              disabled={totalInDb === 0}
-            >
-              <FaTrashAlt />
-              <span className="hidden sm:inline">Delete all</span>
-            </Button>
-          </div>
+          <span className="ml-1.5 px-2 py-0.5 rounded-md bg-panel2 border border-line text-[11px] font-mono text-neutral-500">
+            {totalInDb} total
+          </span>
         </div>
-      </header>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            active={autoRefresh}
+            onClick={() => setAutoRefresh((v) => !v)}
+          >
+            {autoRefresh ? <FaPause /> : <FaPlay />}
+            <span className="hidden sm:inline">
+              {autoRefresh ? "Pause" : "Live"}
+            </span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => fetchAll(true)}
+            disabled={refreshing}
+          >
+            <IoRefresh className={refreshing ? "animate-spin" : ""} />
+            <span className="hidden sm:inline">Refresh</span>
+          </Button>
+          <Button variant="default" size="sm" onClick={() => setExportOpen(true)}>
+            <FaFileExcel />
+            <span className="hidden sm:inline">Export</span>
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => setDeleteAllOpen(true)}
+            disabled={totalInDb === 0}
+          >
+            <FaTrashAlt />
+            <span className="hidden sm:inline">Delete all</span>
+          </Button>
+        </div>
+      </div>
 
-      <main className="max-w-7xl mx-auto px-4 py-4 space-y-3">
+      <div className="space-y-3">
         {/* ---------- Stat cards (from analytics) ---------- */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
           <StatCard label="Total" value={totalInDb} icon={FaBug} delay={0} />
@@ -1328,7 +1317,7 @@ export default function ErrorTrackingDashboard() {
         </div>
 
         {/* ---------- Filters ---------- */}
-        <div className="bg-neutral-900 border border-white/10 rounded-lg p-2.5 space-y-2">
+        <div className="card !p-2.5 space-y-2">
           <div className="flex flex-col md:flex-row gap-2">
             <div className="relative flex-1">
               <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 text-xs" />
@@ -1336,14 +1325,14 @@ export default function ErrorTrackingDashboard() {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search this page (message, type, project, employee…)"
-                className="w-full pl-9 pr-3 py-1.5 bg-neutral-800 border border-white/10 rounded-md text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-white/40"
+                className="input !pl-9 !py-1.5"
               />
             </div>
             <div className="grid grid-cols-2 md:flex gap-2">
               <select
                 value={projectFilter}
                 onChange={(e) => setProjectFilter(e.target.value)}
-                className={selectClass}
+                className="input w-auto !py-1.5 !text-xs"
                 title="Filtered on the server across all errors"
               >
                 <option value="">All projects</option>
@@ -1356,7 +1345,7 @@ export default function ErrorTrackingDashboard() {
               <select
                 value={typeFilter}
                 onChange={(e) => setTypeFilter(e.target.value)}
-                className={selectClass}
+                className="input w-auto !py-1.5 !text-xs"
               >
                 <option value="">All types</option>
                 {typeOptions.map((t) => (
@@ -1368,7 +1357,7 @@ export default function ErrorTrackingDashboard() {
               <select
                 value={dateRange}
                 onChange={(e) => setDateRange(e.target.value)}
-                className={selectClass}
+                className="input w-auto !py-1.5 !text-xs"
               >
                 <option value="">All time</option>
                 <option value="today">Today</option>
@@ -1378,7 +1367,7 @@ export default function ErrorTrackingDashboard() {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className={selectClass}
+                className="input w-auto !py-1.5 !text-xs"
               >
                 <option value="">All status</option>
                 {ALLOWED_STATUSES.map((s) => (
@@ -1395,7 +1384,7 @@ export default function ErrorTrackingDashboard() {
               <span className="text-[10px] uppercase tracking-widest text-neutral-500">
                 Group by
               </span>
-              <div className="flex bg-neutral-800 border border-white/10 rounded-md p-0.5">
+              <div className="flex bg-panel2 border border-line rounded-md p-0.5">
                 {[
                   ["project", "Project", FaBuilding],
                   ["date", "Date", FaCalendarAlt],
@@ -1405,8 +1394,8 @@ export default function ErrorTrackingDashboard() {
                     key={val}
                     onClick={() => setGroupBy(val)}
                     className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${groupBy === val
-                      ? "bg-white text-black"
-                      : "text-neutral-400 hover:text-white"
+                      ? "bg-neutral-900 text-white dark:bg-white dark:text-black"
+                      : "text-neutral-500 hover:text-[var(--fg)]"
                       }`}
                   >
                     <Ic className="text-[10px]" />
@@ -1427,7 +1416,7 @@ export default function ErrorTrackingDashboard() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Check checked={allVisibleSelected} onChange={toggleSelectAll} />
-            <span className="text-xs text-neutral-400">
+            <span className="text-xs text-neutral-500">
               {selectedCount > 0
                 ? `${selectedCount} selected`
                 : "Select all on page"}
@@ -1454,16 +1443,16 @@ export default function ErrorTrackingDashboard() {
             {[...Array(4)].map((_, i) => (
               <div
                 key={i}
-                className="h-16 rounded-xl bg-neutral-900 border border-white/5 animate-pulse"
+                className="h-16 rounded-xl bg-panel border border-line animate-pulse"
               />
             ))}
           </div>
         ) : groups.length === 0 ? (
-          <div className="bg-neutral-900 border border-white/10 rounded-xl p-12 text-center et-in">
-            <div className="inline-flex p-3 rounded-full bg-white/5 border border-white/10 mb-3">
+          <div className="card p-12 text-center et-in">
+            <div className="inline-flex p-3 rounded-full bg-panel2 border border-line mb-3">
               <FaBug className="text-2xl text-neutral-400" />
             </div>
-            <p className="text-sm text-neutral-300 mb-3">No errors found</p>
+            <p className="text-sm text-neutral-500 mb-3">No errors found</p>
             {hasFilters && (
               <Button variant="solid" size="sm" onClick={resetFilters}>
                 Clear filters
@@ -1513,13 +1502,13 @@ export default function ErrorTrackingDashboard() {
                     .map((p, idx, arr) => (
                       <span key={p} className="flex items-center">
                         {idx > 0 && arr[idx - 1] !== p - 1 && (
-                          <span className="px-1 text-neutral-600">…</span>
+                          <span className="px-1 text-neutral-500">…</span>
                         )}
                         <button
                           onClick={() => setPage(p)}
                           className={`min-w-[30px] h-[30px] rounded-md text-xs font-mono transition-colors ${p === safePage
-                            ? "bg-white text-black"
-                            : "bg-neutral-800 border border-white/10 text-neutral-400 hover:text-white"
+                            ? "bg-neutral-900 text-white dark:bg-white dark:text-black"
+                            : "bg-panel2 border border-line text-neutral-500 hover:text-[var(--fg)]"
                             }`}
                         >
                           {p}
@@ -1539,13 +1528,11 @@ export default function ErrorTrackingDashboard() {
             )}
           </>
         )}
-      </main>
+      </div>
 
-      <footer className="border-t border-white/10 mt-8">
-        <div className="max-w-7xl mx-auto px-4 py-4 text-center text-[11px] text-neutral-600 font-mono">
-          Error Tracking Dashboard · React + Next.js
-        </div>
-      </footer>
-    </div>
+      <div className="border-t border-line mt-8 pt-4 text-center text-[11px] text-neutral-500 font-mono">
+        Error Tracking Dashboard · React + Next.js
+      </div>
+    </Shell>
   );
 }

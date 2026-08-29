@@ -16,6 +16,8 @@ import {
   FiLogOut,
   FiPrinter,
   FiKey,
+  FiAlertTriangle,
+  FiFilm,
 } from "react-icons/fi";
 import ThemeToggle from "./ThemeToggle";
 import { clearSession } from "@/lib/session";
@@ -82,7 +84,7 @@ const links = [
     icon: FiCheckSquare,
     section: "Operations",
   },
-  
+
   {
     href: "/team",
     label: "Team Structure",
@@ -96,6 +98,22 @@ const links = [
     icon: FiFileText,
     section: "Operations",
     roles: ["head", "lead"],
+  },
+  //Other system
+
+  {
+    href: "/errors",
+    label: "Errors",
+    icon: FiAlertTriangle,
+    section: "Other System",
+    roles: ["head", "lead"],
+  },
+
+  {
+    href: "/media-tools",
+    label: "Media Tools",
+    icon: FiFilm,
+    section: "Other System",
   },
 ];
 
@@ -127,6 +145,10 @@ export default function Sidebar({ user, onAdd }) {
     {
       name: "Management",
       links: visibleLinks.filter((l) => l.section === "Management"),
+    },
+    {
+      name: "Other System",
+      links: visibleLinks.filter((l) => l.section === "Other System"),
     },
   ];
 
