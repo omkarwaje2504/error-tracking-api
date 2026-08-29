@@ -68,15 +68,27 @@ export default function ConfirmHost() {
             >
                 <div className="card w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
                     <p className="mb-3 text-sm">{promptState.message}</p>
-                    <textarea
-                        className="input mb-5"
-                        rows={3}
-                        placeholder={promptState.placeholder || ''}
-                        value={promptValue}
-                        onChange={(e) => setPromptValue(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitPrompt(); }}
-                        autoFocus
-                    />
+                    {(promptState.inputType === 'password' || promptState.inputType === 'text') ? (
+                        <input
+                            type={promptState.inputType}
+                            className="input mb-5"
+                            placeholder={promptState.placeholder || ''}
+                            value={promptValue}
+                            onChange={(e) => setPromptValue(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') submitPrompt(); }}
+                            autoFocus
+                        />
+                    ) : (
+                        <textarea
+                            className="input mb-5"
+                            rows={3}
+                            placeholder={promptState.placeholder || ''}
+                            value={promptValue}
+                            onChange={(e) => setPromptValue(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitPrompt(); }}
+                            autoFocus
+                        />
+                    )}
                     <div className="flex justify-end gap-2">
                         <button className="btn-ghost" onClick={() => closePrompt(null)}>Cancel</button>
                         <button

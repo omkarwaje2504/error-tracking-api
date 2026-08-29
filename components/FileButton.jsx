@@ -13,9 +13,14 @@ export default function FileButton({ label = 'Choose file', multiple = false, ac
     const [busy, setBusy] = useState(false);
 
     async function handleChange(e) {
-        const files = e.target.files;
+        // Snapshot into a plain array *before* touching e.target.value —
+        // input.files is a live FileList tied to the control's current
+        // selection, so clearing value first (to allow re-picking the same
+        // file next time) empties the very reference we just grabbed, and
+        // every upload silently sees zero files.
+        const files = Array.from(e.target.files || []);
         e.target.value = '';
-        if (!files || !files.length) return;
+        if (!files.length) return;
         setBusy(true);
         try {
             await onFiles?.(files);
