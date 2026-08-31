@@ -21,6 +21,7 @@ export async function GET(req) {
     // only one type, or hide a comma-separated list (mirrors /api/projects).
     const productTypeParam = params.get('productType');
     const excludeProductTypesParam = params.get('excludeProductTypes');
+    const searchParam = params.get('search');
     const page = params.get('page') ? Math.max(1, parseInt(params.get('page'), 10) || 1) : null;
     const limit = params.get('limit') ? Math.min(200, Math.max(1, parseInt(params.get('limit'), 10) || 50)) : null;
 
@@ -74,6 +75,21 @@ export async function GET(req) {
             { assignedTo: { $in: teammates.map((u) => u._id) } },
             { createdBy: oid(session.id) },
         ];
+    }
+
+    // Free-text search on title/description. Combined via $and rather than
+    // overwriting match.$or, since the lead's team-scoping above already
+    // uses $or — Mongo only honors the last $or key on a plain object.
+    if (searchParam && searchParam.trim()) {
+        const escaped = searchParam.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(escaped, 'i');
+        const searchOr = { $or: [{ title: re }, { description: re }] };
+        if (match.$or) {
+            match.$and = [{ $or: match.$or }, searchOr];
+            delete match.$or;
+        } else {
+            Object.assign(match, searchOr);
+        }
     }
 
     const total = (page || limit) ? await db.collection('tasks').countDocuments(match) : null;

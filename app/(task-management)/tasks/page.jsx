@@ -56,6 +56,8 @@ function TasksInner() {
     const PAGE_SIZE = 50;
 
     // filters — applied server-side, not by fetching everything and filtering here
+    const [searchInput, setSearchInput] = useState(''); // raw typed value
+    const [search, setSearch] = useState(''); // debounced value actually sent to the API
     const [assignee, setAssignee] = useState(params.get('assignee') || '');
     const [status, setStatus] = useState('active');
     const [priority, setPriority] = useState('');
@@ -64,16 +66,23 @@ function TasksInner() {
 
     useEffect(() => { init(); }, []);
 
+    // Debounce the search box so we're not firing a request per keystroke.
+    useEffect(() => {
+        const t = setTimeout(() => setSearch(searchInput.trim()), 350);
+        return () => clearTimeout(t);
+    }, [searchInput]);
+
     // Wait for the shared type-filter settings to load once before the
     // first task fetch, so it doesn't briefly show an unfiltered list.
     useEffect(() => {
         if (!settingsLoaded) return;
         load();
-    }, [settingsLoaded, projectFilter, assignee, status, priority, department, productTypeFilter, hiddenProductTypes]);
+    }, [settingsLoaded, projectFilter, search, assignee, status, priority, department, productTypeFilter, hiddenProductTypes]);
 
     function buildQuery(page) {
         const p = new URLSearchParams();
         if (projectFilter) p.set('project', projectFilter);
+        if (search) p.set('search', search);
         if (assignee) p.set('assignee', assignee);
         if (status) p.set('status', status);
         if (priority) p.set('priority', priority);
@@ -189,7 +198,10 @@ function TasksInner() {
     // has approved a task (completed), it's locked here — only Revert
     // (below) can move it, and that's lead/head-only server-side too.
     async function toggleDone(t) {
-        if (t.status === 'completed') return;
+        // Team members can only move pending <-> done. A lead/head can also
+        // flip a completed task straight back to pending, right from this
+        // checkbox — no feedback note required (use "Revert" below for that).
+        if (t.status === 'completed' && !canManageTasks(user)) return;
         const next = t.status === 'pending' ? 'done' : 'pending';
         const res = await fetch(`/api/tasks/${t._id}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -291,6 +303,12 @@ function TasksInner() {
 
             {/* Filter bar */}
             <div className="mb-4 flex flex-wrap items-center gap-2">
+                <input
+                    className="input w-auto min-w-[220px]"
+                    placeholder="Search title or description…"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                />
                 <select className="input w-auto" value={status} onChange={(e) => setStatus(e.target.value)}>
                     <option value="active">Active</option>
                     <option value="done">Done — awaiting review</option>
@@ -315,11 +333,11 @@ function TasksInner() {
                         {productTypes.map((t) => <option key={t._id} value={t.name}>{t.name}</option>)}
                     </select>
                 )}
-                {(status !== 'active' || assignee || priority || department || productTypeFilter || hiddenProductTypes.length > 0) && (
+                {(searchInput || status !== 'active' || assignee || priority || department || productTypeFilter || hiddenProductTypes.length > 0) && (
                     <button
                         className="btn-ghost"
                         onClick={() => {
-                            setStatus('active'); setAssignee(''); setPriority(''); setDepartment('');
+                            setSearchInput(''); setStatus('active'); setAssignee(''); setPriority(''); setDepartment('');
                             if (canEditTypes) clearTypeFilters();
                         }}
                     >
@@ -401,9 +419,13 @@ function TasksInner() {
                                             type="checkbox"
                                             className="h-[18px] w-[18px] accent-neutral-900 dark:accent-white disabled:opacity-40"
                                             checked={t.status !== 'pending'}
-                                            disabled={t.status === 'completed'}
+                                            disabled={t.status === 'completed' && !isManager}
                                             onChange={() => toggleDone(t)}
-                                            title={t.status === 'completed' ? 'Completed — a lead can revert it' : 'Mark done'}
+                                            title={
+                                                t.status === 'completed'
+                                                    ? (isManager ? 'Completed — click to send straight back to pending' : 'Completed — a lead can revert it')
+                                                    : 'Mark done'
+                                            }
                                         />
                                     )}
                                 </td>
