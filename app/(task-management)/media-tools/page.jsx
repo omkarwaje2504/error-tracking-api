@@ -5,6 +5,7 @@ import Shell from '@/components/Shell';
 import { getSession } from '@/lib/session';
 import VideoCompressTab from '@/components/mediaTools/VideoCompressTab';
 import VideoConvertTab from '@/components/mediaTools/VideoConvertTab';
+import AudioConvertTab from '@/components/mediaTools/AudioConvertTab';
 import ImageConvertTab from '@/components/mediaTools/ImageConvertTab';
 import ImageToPdfTab from '@/components/mediaTools/ImageToPdfTab';
 import PdfMergeTab from '@/components/mediaTools/PdfMergeTab';
@@ -13,6 +14,7 @@ import PdfCompressTab from '@/components/mediaTools/PdfCompressTab';
 const TABS = [
     { key: 'video-compress', label: 'Video Compressor', icon: '🎬', Component: VideoCompressTab },
     { key: 'video-convert', label: 'Video Converter', icon: '🔁', Component: VideoConvertTab },
+    { key: 'audio-convert', label: 'Audio Converter', icon: '🎧', Component: AudioConvertTab },
     { key: 'image-convert', label: 'Image Converter', icon: '🖼️', Component: ImageConvertTab },
     { key: 'image-to-pdf', label: 'Image → PDF', icon: '📸', Component: ImageToPdfTab },
     { key: 'pdf-merge', label: 'PDF Merger', icon: '📎', Component: PdfMergeTab },
@@ -40,7 +42,7 @@ export default function MediaTools() {
             <div className="mb-7">
                 <h1 className="text-2xl font-semibold sm:text-3xl">Media Tools</h1>
                 <p className="mt-1 text-neutral-500">
-                    Compress and convert video, images and PDFs — everything runs locally in your browser, nothing is uploaded anywhere.
+                    Compress and convert video, audio, images and PDFs — everything runs locally in your browser, nothing is uploaded anywhere.
                 </p>
             </div>
 
