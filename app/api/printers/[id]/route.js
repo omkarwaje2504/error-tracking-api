@@ -8,14 +8,25 @@ export async function PUT(req, { params }) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const db = await connectDB();
     const { id } = await params;
-    const { name,email_id } = await req.json();
+    const { name, email_id, printerType, pageColor, fileType, fileSize, pageType } = await req.json();
     if (!name || !name.trim()) {
         return NextResponse.json({ error: 'Name is required' }, { status: 400 });
     }
     if (!email_id || !email_id.trim()) {
         return NextResponse.json({ error: 'Email Id is required' }, { status: 400 });
     }
-    await db.collection('printers').updateOne({ _id: oid(id) }, { $set: { name: name.trim(),email_id:email_id.trim(), updatedAt: new Date() } });
+    await db.collection('printers').updateOne({ _id: oid(id) }, {
+        $set: {
+            name: name.trim(),
+            email_id: email_id.trim(),
+            printerType: printerType?.trim() || '',
+            pageColor: pageColor?.trim() || '',
+            fileType: fileType?.trim() || '',
+            fileSize: fileSize?.trim() || '',
+            pageType: pageType?.trim() || '',
+            updatedAt: new Date(),
+        },
+    });
     const doc = await db.collection('printers').findOne({ _id: oid(id) });
     return NextResponse.json(doc);
 }

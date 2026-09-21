@@ -22,6 +22,11 @@ export default function Printers() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [emailId, setEmailId] = useState("");
+  const [printerType, setPrinterType] = useState("");
+  const [pageColor, setPageColor] = useState("");
+  const [fileType, setFileType] = useState("");
+  const [fileSize, setFileSize] = useState("");
+  const [pageType, setPageType] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -46,6 +51,11 @@ export default function Printers() {
     setEdit(null);
     setName("");
     setEmailId("");
+    setPrinterType("");
+    setPageColor("");
+    setFileType("");
+    setFileSize("");
+    setPageType("");
     setOpen(true);
   }
 
@@ -53,6 +63,11 @@ export default function Printers() {
     setEdit(p._id);
     setName(p.name || "");
     setEmailId(p.email_id || "");
+    setPrinterType(p.printerType || "");
+    setPageColor(p.pageColor || "");
+    setFileType(p.fileType || "");
+    setFileSize(p.fileSize || "");
+    setPageType(p.pageType || "");
     setOpen(true);
   }
 
@@ -61,6 +76,11 @@ export default function Printers() {
     setEdit(null);
     setName("");
     setEmailId("");
+    setPrinterType("");
+    setPageColor("");
+    setFileType("");
+    setFileSize("");
+    setPageType("");
   }
 
   async function save() {
@@ -85,6 +105,11 @@ export default function Printers() {
         body: JSON.stringify({
           name: name.trim(),
           email_id: emailId.trim(),
+          printerType: printerType.trim(),
+          pageColor: pageColor.trim(),
+          fileType: fileType.trim(),
+          fileSize: fileSize.trim(),
+          pageType: pageType.trim(),
         }),
       });
 
@@ -161,7 +186,7 @@ export default function Printers() {
 
       <div className="card overflow-x-auto !p-0">
         {loading ? (
-          <TableSkeleton rows={5} cols={3} />
+          <TableSkeleton rows={5} cols={7} />
         ) : rows.length === 0 ? (
           <EmptyState
             icon="🖨️"
@@ -175,12 +200,22 @@ export default function Printers() {
             onAction={openNew}
           />
         ) : (
-          <table className="w-full min-w-[650px] text-sm">
+          <table className="w-full min-w-[950px] text-sm">
             <thead>
               <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-neutral-500">
                 <th className="px-4 py-3 font-medium">Printer Name</th>
 
                 <th className="px-4 py-3 font-medium">Email ID</th>
+
+                <th className="px-4 py-3 font-medium">Printer Type</th>
+
+                <th className="px-4 py-3 font-medium">Page Color</th>
+
+                <th className="px-4 py-3 font-medium">File Type</th>
+
+                <th className="px-4 py-3 font-medium">File Size</th>
+
+                <th className="px-4 py-3 font-medium">Page Type</th>
 
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>
@@ -201,6 +236,26 @@ export default function Printers() {
 
                     <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
                       {p.email_id || "—"}
+                    </td>
+
+                    <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
+                      {p.printerType || "—"}
+                    </td>
+
+                    <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
+                      {p.pageColor || "—"}
+                    </td>
+
+                    <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
+                      {p.fileType || "—"}
+                    </td>
+
+                    <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
+                      {p.fileSize || "—"}
+                    </td>
+
+                    <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
+                      {p.pageType || "—"}
                     </td>
 
                     <td className="px-4 py-3">
@@ -253,6 +308,68 @@ export default function Printers() {
             type="email"
             value={emailId}
             onChange={(e) => setEmailId(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && save()}
+          />
+        </div>
+
+        <div className="mb-5 grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Printer Type</label>
+
+            <input
+              className="input"
+              placeholder="Digital Print"
+              value={printerType}
+              onChange={(e) => setPrinterType(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && save()}
+            />
+          </div>
+
+          <div>
+            <label className="label">Page Color</label>
+
+            <input
+              className="input"
+              placeholder="CMYK"
+              value={pageColor}
+              onChange={(e) => setPageColor(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && save()}
+            />
+          </div>
+        </div>
+
+        <div className="mb-5">
+          <label className="label">File Type Needed</label>
+
+          <input
+            className="input"
+            placeholder="PDF"
+            value={fileType}
+            onChange={(e) => setFileType(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && save()}
+          />
+        </div>
+
+        <div className="mb-5">
+          <label className="label">File Size</label>
+
+          <input
+            className="input"
+            placeholder="13x19 / 12x18"
+            value={fileSize}
+            onChange={(e) => setFileSize(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && save()}
+          />
+        </div>
+
+        <div className="mb-5">
+          <label className="label">Page Type</label>
+
+          <input
+            className="input"
+            placeholder="210GSM / 170 GSM"
+            value={pageType}
+            onChange={(e) => setPageType(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && save()}
           />
         </div>
