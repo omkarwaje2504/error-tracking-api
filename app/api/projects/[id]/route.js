@@ -18,10 +18,6 @@ export async function GET(req, { params }) {
         { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
         { $lookup: { from: 'companies', localField: 'company', foreignField: '_id', as: 'company' } },
         { $unwind: { path: '$company', preserveNullAndEmptyArrays: true } },
-        { $lookup: { from: 'users', localField: 'salesPerson', foreignField: '_id', as: 'salesPerson', pipeline: [{ $project: USER_FIELDS }] } },
-        { $unwind: { path: '$salesPerson', preserveNullAndEmptyArrays: true } },
-        { $lookup: { from: 'users', localField: 'servicePerson', foreignField: '_id', as: 'servicePerson', pipeline: [{ $project: USER_FIELDS }] } },
-        { $unwind: { path: '$servicePerson', preserveNullAndEmptyArrays: true } },
         { $lookup: { from: 'users', localField: 'createdBy', foreignField: '_id', as: 'createdBy', pipeline: [{ $project: USER_FIELDS }] } },
         { $unwind: { path: '$createdBy', preserveNullAndEmptyArrays: true } },
     ]).toArray();
@@ -46,8 +42,8 @@ export async function PUT(req, { params }) {
     if (body.brand !== undefined) set.brand = body.brand ? oid(body.brand) : null;
     if (body.company !== undefined) set.company = body.company ? oid(body.company) : null;
     if (body.client !== undefined) set.client = body.client;
-    if (body.salesPerson !== undefined) set.salesPerson = body.salesPerson ? oid(body.salesPerson) : null;
-    if (body.servicePerson !== undefined) set.servicePerson = body.servicePerson ? oid(body.servicePerson) : null;
+    if (body.salesPerson !== undefined) set.salesPerson = body.salesPerson?.trim() || '';
+    if (body.servicePerson !== undefined) set.servicePerson = body.servicePerson?.trim() || '';
     if (body.projectType !== undefined) set.projectType = body.projectType;
     if (body.deadline !== undefined) set.deadline = body.deadline || null;
     if (body.link !== undefined) set.link = body.link;
