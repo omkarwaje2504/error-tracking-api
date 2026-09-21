@@ -11,6 +11,10 @@ export async function GET(req) {
     const params = new URL(req.url).searchParams;
     const projectId = params.get('project');
     const parentId = params.get('parent');
+    // Children of a task (subtasks or bugs — see POST) share the parentTask
+    // field; `kind` narrows which. Legacy children predate this field, so
+    // "subtask" also matches docs with no kind set at all.
+    const kindParam = params.get('kind');
     const teamFilter = params.get('team');
     const assigneeFilter = params.get('assignee');
     const mineOnly = params.get('mine') === 'true';
@@ -43,7 +47,9 @@ export async function GET(req) {
         match.project = oid(projectId);
     }
     if (parentId) {
-        match.parentTask = oid(parentId);        // subtasks of one task
+        match.parentTask = oid(parentId);        // children of one task
+        if (kindParam === 'bug') match.kind = 'bug';
+        else if (kindParam === 'subtask') match.kind = { $ne: 'bug' };
     } else {
         match.parentTask = { $in: [null, undefined] }; // only top-level in main list
     }
@@ -124,7 +130,7 @@ export async function GET(req) {
                 from: 'tasks',
                 let: { taskId: '$_id' },
                 pipeline: [
-                    { $match: { $expr: { $eq: ['$parentTask', '$$taskId'] }, deleted: { $ne: true } } },
+                    { $match: { $expr: { $and: [{ $eq: ['$parentTask', '$$taskId'] }, { $ne: ['$kind', 'bug'] }] }, deleted: { $ne: true } } },
                     {
                         $group: {
                             _id: null,
@@ -136,10 +142,29 @@ export async function GET(req) {
                 as: 'subCount',
             }
         },
+        {
+            $lookup: {
+                from: 'tasks',
+                let: { taskId: '$_id' },
+                pipeline: [
+                    { $match: { $expr: { $and: [{ $eq: ['$parentTask', '$$taskId'] }, { $eq: ['$kind', 'bug'] }] }, deleted: { $ne: true } } },
+                    {
+                        $group: {
+                            _id: null,
+                            total: { $sum: 1 },
+                            done: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+                        }
+                    },
+                ],
+                as: 'bugCount',
+            }
+        },
 
         {
             $addFields: {
                 progress: { $ifNull: [{ $arrayElemAt: ['$progress', 0] }, { added: 0, completed: 0, declined: 0 }] },
+                subCount: { $ifNull: [{ $arrayElemAt: ['$subCount', 0] }, { total: 0, done: 0 }] },
+                bugCount: { $ifNull: [{ $arrayElemAt: ['$bugCount', 0] }, { total: 0, done: 0 }] },
             }
         },
     ]).toArray();
@@ -156,7 +181,7 @@ export async function POST(req) {
     const db = await connectDB();
     const {
         title, description, project, assignedTo, trackProgress, unit, target,
-        parentTask, department, priority, dueDate, stageType, stageId, attachments,
+        parentTask, department, priority, dueDate, stageType, stageId, attachments, kind,
     } = await req.json();
     if (!title || !title.trim()) {
         return NextResponse.json({ error: 'Title is required' }, { status: 400 });
@@ -181,6 +206,9 @@ export async function POST(req) {
         stageType: stageType || null,
         stageId: stageId || null,
         attachments: attachments || [],
+        // Only meaningful on a child (parentTask set): distinguishes a bug
+        // filed against a task from a regular subtask/checklist item.
+        kind: kind === 'bug' ? 'bug' : null,
     };
     const { insertedId } = await db.collection('tasks').insertOne(doc);
 

@@ -18,7 +18,7 @@ export default function SubtaskModal({ task, users, open, onClose, onChange }) {
     }, [open, task]);
 
     async function load() {
-        const res = await fetch(`/api/tasks?parent=${task._id}`);
+        const res = await fetch(`/api/tasks?parent=${task._id}&kind=subtask`);
         setSubs(await res.json());
     }
 

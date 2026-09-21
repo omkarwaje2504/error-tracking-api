@@ -5,6 +5,7 @@ import Shell from '@/components/Shell';
 import FileButton from '@/components/FileButton';
 import ProgressModal from '@/components/ProgressModal';
 import SubtaskModal from '@/components/SubtaskModal';
+import BugModal from '@/components/BugModal';
 import TaskEditModal from '@/components/TaskEditModal';
 import ProductTypePicker from '@/components/ProductTypePicker';
 import PrinterPicker from '@/components/PrinterPicker';
@@ -14,9 +15,14 @@ import { confirmDialog, promptDialog } from '@/lib/confirm';
 import { getSession } from '@/lib/session';
 import { getReference } from '@/lib/referenceCache';
 import { uploadFilesToR2 } from '@/lib/upload';
+import { colorFor } from '@/lib/colors';
 import { PRIORITY_META, priorityMeta, isOverdue, formatDate, pointsFor, DEPARTMENTS, departmentLabel, statusMeta, canManageTasks } from '@/lib/taskDisplay';
 
 const STATUS_OPTIONS = ['active', 'on-hold', 'completed', 'cancelled'];
+
+const STATUS_DOT = {
+    active: 'bg-emerald-500', 'on-hold': 'bg-amber-500', completed: 'bg-[var(--accent)]', cancelled: 'bg-neutral-400',
+};
 
 const STAGE_LABELS = {
     kickoff: 'Kickoff Meeting',
@@ -26,8 +32,29 @@ const STAGE_LABELS = {
     delivery: 'Delivery',
 };
 
+const STAGE_ICONS = {
+    kickoff: '🚀', design: '🎨', development: '💻', production: '🖨️', delivery: '📦',
+};
+
+const STAGE_BARS = {
+    kickoff: 'bg-violet-500', design: 'bg-pink-500', development: 'bg-blue-500', production: 'bg-amber-500', delivery: 'bg-emerald-500',
+};
+
 function uid() {
     return Math.random().toString(36).slice(2, 10);
+}
+
+function initials(name) {
+    return (name || '?').trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('') || '?';
+}
+
+function Avatar({ name, size = 'h-6 w-6 text-[10px]' }) {
+    const c = colorFor(name || '');
+    return (
+        <span className={`inline-flex shrink-0 items-center justify-center rounded-full font-semibold ${c.bg} ${c.text} ${size}`}>
+            {initials(name)}
+        </span>
+    );
 }
 
 function stageDefaults(type) {
@@ -90,6 +117,7 @@ export default function ProjectDirectory() {
     const [uploadError, setUploadError] = useState('');
     const [progressTask, setProgressTask] = useState(null);
     const [subtaskParent, setSubtaskParent] = useState(null);
+    const [bugParent, setBugParent] = useState(null);
     const [editTask, setEditTask] = useState(null);
 
     useEffect(() => { load(); }, [id]);
@@ -126,7 +154,7 @@ export default function ProjectDirectory() {
         setForm({
             name: p.name || '', description: p.description || '', link: p.link || '', status: p.status || 'active',
             company: p.company?._id || '', brand: p.brand?._id || '', client: p.client || '',
-            salesPerson: p.salesPerson?._id || '', servicePerson: p.servicePerson?._id || '',
+            salesPerson: p.salesPerson || '', servicePerson: p.servicePerson || '',
             projectType: p.projectType || '', deadline: p.deadline ? String(p.deadline).slice(0, 10) : '',
             attachments: p.attachments || [],
             sections,
@@ -371,6 +399,13 @@ export default function ProjectDirectory() {
                 onClose={() => setSubtaskParent(null)}
                 onChange={loadTasks}
             />
+            <BugModal
+                task={bugParent}
+                users={users}
+                open={!!bugParent}
+                onClose={() => setBugParent(null)}
+                onChange={loadTasks}
+            />
             <TaskEditModal
                 task={editTask}
                 users={users}
@@ -390,7 +425,9 @@ export default function ProjectDirectory() {
                 />
                 <div className="flex shrink-0 items-center gap-2.5">
                     {dirty && !saving && (
-                        <span className="hidden text-xs text-amber-500 sm:inline">● Unsaved changes</span>
+                        <span className="hidden items-center gap-1.5 text-xs text-amber-500 sm:flex">
+                            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Unsaved changes
+                        </span>
                     )}
                     <button className="btn-primary" onClick={save} disabled={saving}>
                         {saving ? 'Saving…' : 'Save'}
@@ -399,9 +436,12 @@ export default function ProjectDirectory() {
             </div>
 
             <div className="mb-5 flex flex-wrap items-center gap-3">
-                <select className="input w-auto capitalize" value={form.status} onChange={(e) => set('status', e.target.value)}>
-                    {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
+                <div className="relative">
+                    <span className={`pointer-events-none absolute left-3 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full ${STATUS_DOT[form.status] || 'bg-neutral-400'}`} />
+                    <select className="input w-auto !pl-6 capitalize" value={form.status} onChange={(e) => set('status', e.target.value)}>
+                        {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                </div>
                 <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
                     <span className="shrink-0 font-medium text-neutral-500">Link:</span>
                     <input
@@ -431,7 +471,9 @@ export default function ProjectDirectory() {
             />
 
             {/* Meta grid */}
-            <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="card mb-5">
+            <p className="label mb-3">Project details</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
                     <label className="label">Division</label>
                     <select className="input" value={form.brand} onChange={(e) => selectBrand(e.target.value)}>
@@ -456,17 +498,11 @@ export default function ProjectDirectory() {
                 </div>
                 <div>
                     <label className="label">Sales person</label>
-                    <select className="input" value={form.salesPerson} onChange={(e) => set('salesPerson', e.target.value)}>
-                        <option value="">None</option>
-                        {users.map((u) => <option key={u._id} value={u._id}>{u.name}</option>)}
-                    </select>
+                    <input className="input" placeholder="Type a name" value={form.salesPerson} onChange={(e) => set('salesPerson', e.target.value)} />
                 </div>
                 <div>
                     <label className="label">Service person</label>
-                    <select className="input" value={form.servicePerson} onChange={(e) => set('servicePerson', e.target.value)}>
-                        <option value="">None</option>
-                        {users.map((u) => <option key={u._id} value={u._id}>{u.name}</option>)}
-                    </select>
+                    <input className="input" placeholder="Type a name" value={form.servicePerson} onChange={(e) => set('servicePerson', e.target.value)} />
                 </div>
                 <div>
                     <label className="label">Product type</label>
@@ -492,6 +528,7 @@ export default function ProjectDirectory() {
                         );
                     })()}
                 </div>
+            </div>
             </div>
 
             {/* Attachments */}
@@ -537,6 +574,7 @@ export default function ProjectDirectory() {
             {form.sections.map((s) => (
                 <div key={s.id} className="mb-8">
                     <div className="mb-3 flex items-center gap-2">
+                        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-panel2 text-sm">{STAGE_ICONS[s.type] || '•'}</span>
                         <span className="text-sm text-neutral-500">Select next Action:</span>
                         <select
                             className="input w-auto"
@@ -548,7 +586,8 @@ export default function ProjectDirectory() {
                         <button className="ml-auto text-xs text-neutral-500 hover:text-red-400" onClick={() => removeStage(s.id)}>Remove section ✕</button>
                     </div>
 
-                    <div className="card">
+                    <div className="card relative overflow-hidden">
+                        <span className={`absolute inset-y-0 left-0 w-1 ${STAGE_BARS[s.type] || 'bg-neutral-400'}`} />
                         {s.type === 'kickoff' && (
                             <KickoffStage section={s} users={users} updateStageData={updateStageData} />
                         )}
@@ -556,7 +595,7 @@ export default function ProjectDirectory() {
                             <StageTaskBoard
                                 projectId={id} stageType="design" sectionId={s.id} users={users} user={user}
                                 tasks={projectTasks} onChanged={loadTasks} openProgress={setProgressTask}
-                                openSubtasks={setSubtaskParent} openEdit={setEditTask}
+                                openSubtasks={setSubtaskParent} openBugs={setBugParent} openEdit={setEditTask}
                                 uploadFiles={uploadFiles} addLabel="+ Add design details…"
                             />
                         )}
@@ -564,6 +603,7 @@ export default function ProjectDirectory() {
                             <DevelopmentStage
                                 projectId={id} section={s} users={users} user={user} tasks={projectTasks}
                                 onChanged={loadTasks} openProgress={setProgressTask} openSubtasks={setSubtaskParent}
+                                openBugs={setBugParent}
                                 openEdit={setEditTask}
                                 uploadFiles={uploadFiles} updateStageData={updateStageData}
                             />
@@ -579,12 +619,12 @@ export default function ProjectDirectory() {
             ))}
 
             {/* Add new stage */}
-            <div className="mb-10 flex flex-wrap items-center gap-2">
-                <span className="text-neutral-500">+ Select next Action…</span>
+            <div className="mb-10 flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-line px-4 py-3">
+                <span className="text-sm text-neutral-500">+ Select next Action…</span>
                 <select className="input w-auto" value={newStageType} onChange={(e) => setNewStageType(e.target.value)}>
                     {Object.entries(STAGE_LABELS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
                 </select>
-                <button className="btn-ghost" onClick={() => addStage(newStageType)}>Add</button>
+                <button className="btn-ghost ml-auto" onClick={() => addStage(newStageType)}>Add</button>
             </div>
 
             {/* Other tasks — not linked to any stage (global-style, but scoped to this project) */}
@@ -596,7 +636,7 @@ export default function ProjectDirectory() {
                 <StageTaskBoard
                     projectId={id} stageType={null} sectionId={null} users={users} user={user}
                     tasks={projectTasks} onChanged={loadTasks} openProgress={setProgressTask}
-                    openSubtasks={setSubtaskParent} openEdit={setEditTask}
+                    openSubtasks={setSubtaskParent} openBugs={setBugParent} openEdit={setEditTask}
                     resolveStage={resolveTaskStage}
                     uploadFiles={uploadFiles} addLabel="+ Add task…"
                 />
@@ -608,8 +648,9 @@ export default function ProjectDirectory() {
                 <div className="mb-4 max-h-80 space-y-3 overflow-y-auto">
                     {messages.length === 0 && <p className="text-sm text-neutral-500">No messages yet. Start the discussion.</p>}
                     {messages.map((m) => (
-                        <div key={m._id} className="flex items-start justify-between gap-2 rounded-xl bg-panel2 px-3.5 py-2.5">
-                            <div className="min-w-0">
+                        <div key={m._id} className="flex items-start gap-2.5 rounded-xl bg-panel2 px-3.5 py-2.5">
+                            <Avatar name={m.user?.name} size="mt-0.5 h-7 w-7 text-xs" />
+                            <div className="min-w-0 flex-1">
                                 <p className="text-xs text-neutral-500">
                                     {m.user?.name || 'Unknown'} · {new Date(m.createdAt).toLocaleString()}
                                 </p>
@@ -740,10 +781,11 @@ function TaskAddForm({ users, onSubmit, onCancel, saving, uploadFiles, submitLab
     );
 }
 
-function StageTaskRow({ task, user, onToggle, onApprove, onRevert, onDelete, openProgress, openSubtasks, openEdit }) {
+function StageTaskRow({ task, user, onToggle, onApprove, onRevert, onDelete, openProgress, openSubtasks, openBugs, openEdit }) {
     const isManager = canManageTasks(user);
+    const firstAssignee = task.assignedTo?.[0];
     return (
-        <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-line px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-line px-3 py-2.5 transition-colors hover:bg-panel2/40">
             <input
                 type="checkbox"
                 checked={task.status !== 'pending'}
@@ -752,6 +794,7 @@ function StageTaskRow({ task, user, onToggle, onApprove, onRevert, onDelete, ope
                 title={task.status === 'completed' ? 'Completed — a lead can revert it' : 'Mark done'}
                 className="h-[18px] w-[18px] shrink-0 accent-neutral-900 dark:accent-white disabled:opacity-40"
             />
+            {firstAssignee ? <Avatar name={firstAssignee.name} /> : <span className="h-6 w-6 shrink-0 rounded-full border border-dashed border-line" />}
             <div className="min-w-0 flex-1">
                 <p className={`truncate text-sm ${task.status !== 'pending' ? 'text-neutral-500 line-through' : 'font-medium'}`}>{task.title}</p>
                 <p className="truncate text-xs text-neutral-500">
@@ -782,6 +825,14 @@ function StageTaskRow({ task, user, onToggle, onApprove, onRevert, onDelete, ope
             <button className="btn-ghost shrink-0 !px-2.5 !py-1 !text-xs" onClick={() => openSubtasks(task)}>
                 Subtasks{task.subCount?.total ? ` (${task.subCount.done}/${task.subCount.total})` : ''}
             </button>
+            {task.stageType === 'development' && (
+                <button
+                    className={`btn-ghost shrink-0 !px-2.5 !py-1 !text-xs ${task.bugCount?.total > task.bugCount?.done ? '!text-red-500' : ''}`}
+                    onClick={() => openBugs(task)}
+                >
+                    Bugs{task.bugCount?.total ? ` (${task.bugCount.done}/${task.bugCount.total})` : ''}
+                </button>
+            )}
             {task.trackProgress && (
                 <button className="btn-ghost shrink-0 !px-2.5 !py-1 !text-xs" onClick={() => openProgress(task)}>
                     {task.progress?.completed || 0}{task.target ? `/${task.target}` : ''} {task.unit || ''}
@@ -793,15 +844,18 @@ function StageTaskRow({ task, user, onToggle, onApprove, onRevert, onDelete, ope
     );
 }
 
-function StageTaskBoard({ projectId, stageType, sectionId, users, user, tasks, onChanged, openProgress, openSubtasks, openEdit, resolveStage, uploadFiles, addLabel }) {
+function StageTaskBoard({ projectId, stageType, sectionId, users, user, tasks, onChanged, openProgress, openSubtasks, openBugs, openEdit, resolveStage, uploadFiles, addLabel }) {
     const [adding, setAdding] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [showCompleted, setShowCompleted] = useState(false);
 
     // Older tasks predate the stageType/stageId fields and simply don't have
     // them set (undefined, not null) — treat that the same as "no stage" so
     // they still show up here instead of silently disappearing.
     const list = tasks.filter((t) => (t.stageType ?? null) === (stageType ?? null) && (t.stageId ?? null) === (sectionId ?? null));
     const sorted = [...list].sort((a, b) => (a.status === 'completed') - (b.status === 'completed'));
+    const completedList = sorted.filter((t) => t.status === 'completed');
+    const visible = showCompleted ? sorted : sorted.filter((t) => t.status !== 'completed');
 
     // Free self-service pending <-> done toggle. Completed is locked here —
     // only a lead/head's Revert action (server-enforced) can move it back.
@@ -888,13 +942,26 @@ function StageTaskBoard({ projectId, stageType, sectionId, users, user, tasks, o
 
     return (
         <div>
-            {sorted.length === 0 && !adding && <p className="mb-3 text-sm text-neutral-500">Nothing here yet.</p>}
-            {sorted.length > 0 && (
+            {completedList.length > 0 && (
+                <button
+                    type="button"
+                    className="mb-2 text-xs text-neutral-500 hover:underline"
+                    onClick={() => setShowCompleted((s) => !s)}
+                >
+                    {showCompleted ? 'Hide' : 'Show'} {completedList.length} completed
+                </button>
+            )}
+            {visible.length === 0 && !adding && (
+                <p className="mb-3 text-sm text-neutral-500">
+                    {sorted.length > 0 ? 'All done — completed tasks are hidden.' : 'Nothing here yet.'}
+                </p>
+            )}
+            {visible.length > 0 && (
                 <div className="mb-3 space-y-1.5">
-                    {sorted.map((t) => (
+                    {visible.map((t) => (
                         <StageTaskRow
                             key={t._id} task={t} user={user} onToggle={toggle} onApprove={approve} onRevert={revert} onDelete={del}
-                            openProgress={openProgress} openSubtasks={openSubtasks} openEdit={openEdit}
+                            openProgress={openProgress} openSubtasks={openSubtasks} openBugs={openBugs} openEdit={openEdit}
                         />
                     ))}
                 </div>
@@ -912,7 +979,7 @@ function StageTaskBoard({ projectId, stageType, sectionId, users, user, tasks, o
     );
 }
 
-function DevelopmentStage({ projectId, section, users, user, tasks, onChanged, openProgress, openSubtasks, openEdit, uploadFiles, updateStageData }) {
+function DevelopmentStage({ projectId, section, users, user, tasks, onChanged, openProgress, openSubtasks, openBugs, openEdit, uploadFiles, updateStageData }) {
     const { attachments } = section.data;
     return (
         <>
@@ -940,7 +1007,7 @@ function DevelopmentStage({ projectId, section, users, user, tasks, onChanged, o
             <StageTaskBoard
                 projectId={projectId} stageType="development" sectionId={section.id} users={users} user={user}
                 tasks={tasks} onChanged={onChanged} openProgress={openProgress} openSubtasks={openSubtasks}
-                openEdit={openEdit} uploadFiles={uploadFiles} addLabel="+ Add new task…"
+                openBugs={openBugs} openEdit={openEdit} uploadFiles={uploadFiles} addLabel="+ Add new task…"
             />
         </>
     );
