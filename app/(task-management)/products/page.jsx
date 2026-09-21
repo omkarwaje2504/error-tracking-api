@@ -143,19 +143,17 @@ export default function ProductTypes() {
       </div>
 
       {loading ? (
-        <div className="card overflow-hidden !p-0">
-          <div className="divide-y divide-border">
-            {[1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between px-5 py-4"
-              >
-                <div className="h-4 w-40 animate-pulse rounded bg-neutral-200 dark:bg-neutral-700" />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div
+              key={i}
+              className="card flex items-center justify-between gap-3 !p-4"
+            >
+              <div className="h-4 w-32 animate-pulse rounded bg-neutral-200 dark:bg-neutral-700" />
 
-                <div className="h-7 w-24 animate-pulse rounded bg-neutral-200 dark:bg-neutral-700" />
-              </div>
-            ))}
-          </div>
+              <div className="h-7 w-16 animate-pulse rounded bg-neutral-200 dark:bg-neutral-700" />
+            </div>
+          ))}
         </div>
       ) : rows.length === 0 ? (
         <div className="card">
@@ -172,67 +170,42 @@ export default function ProductTypes() {
           />
         </div>
       ) : (
-        <div className="card overflow-x-auto !p-0">
-          {loading ? (
-            <TableSkeleton rows={5} cols={2} />
-          ) : rows.length === 0 ? (
-            <EmptyState
-              icon="🏷️"
-              title={q ? "Nothing matches." : "No product types yet."}
-              hint={
-                q
-                  ? undefined
-                  : "You can also just type a new one straight into a project's Product type field."
-              }
-              action={q ? undefined : "+ New Product Type"}
-              onAction={openNew}
-            />
-          ) : (
-            <table className="w-full min-w-[500px] text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-neutral-500">
-                  <th className="px-4 py-3 font-medium">Product Type</th>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {rows.map((t) => {
+            const c = colorFor(t.name);
 
-                  <th className="px-4 py-3 text-right font-medium">Actions</th>
-                </tr>
-              </thead>
+            return (
+              <div
+                key={t._id}
+                className="card flex items-center justify-between"
+              >
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${c.bar}`} />
+                  <span className="min-w-0 break-words font-medium">
+                    {t.name}
+                  </span>
+                </div>
 
-              <tbody>
-                {rows.map((t) => {
-                  const c = colorFor(t.name);
+                <div className="flex shrink-0 gap-1">
+                  <button
+                    className="rounded-lg p-1.5 text-neutral-500 hover:bg-panel2 hover:text-neutral-800 dark:hover:text-neutral-200"
+                    title="Edit"
+                    onClick={() => openEdit(t)}
+                  >
+                    ✎
+                  </button>
 
-                  return (
-                    <tr
-                      key={t._id}
-                      className="border-b border-line/60 last:border-0 hover:bg-panel2/40"
-                    >
-                      <td className="px-4 py-3 font-medium">
-                        <span>{t.name}</span>
-                      </td>
-
-                      <td className="px-4 py-3">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            className="btn-ghost !px-3 !py-1.5 !text-xs"
-                            onClick={() => openEdit(t)}
-                          >
-                            Edit
-                          </button>
-
-                          <button
-                            className="btn-ghost !px-3 !py-1.5 !text-xs text-red-500"
-                            onClick={() => remove(t)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+                  <button
+                    className="rounded-lg p-1.5 text-neutral-500 hover:bg-panel2 hover:text-red-400"
+                    title="Delete"
+                    onClick={() => remove(t)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 

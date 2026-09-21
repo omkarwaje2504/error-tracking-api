@@ -17,7 +17,6 @@ export default function CompaniesAndBrands() {
   const [companies, setCompanies] = useState([]);
   const [brands, setBrands] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [q, setQ] = useState("");
 
   const [companyModal, setCompanyModal] = useState(false);
   const [companyEdit, setCompanyEdit] = useState(null);
@@ -145,22 +144,10 @@ export default function CompaniesAndBrands() {
     return map;
   }, [brands]);
 
-  const filteredCompanies = useMemo(() => {
-    if (!q) return companies;
-    const ql = q.toLowerCase();
-    return companies.filter(
-      (c) =>
-        c.name.toLowerCase().includes(ql) ||
-        (brandsByCompany[c._id] || []).some((b) =>
-          b.name.toLowerCase().includes(ql),
-        ),
-    );
-  }, [companies, brandsByCompany, q]);
-
   const groupedCompanies = useMemo(() => {
     const groups = {};
 
-    [...filteredCompanies]
+    [...companies]
       .sort((a, b) => a.name.localeCompare(b.name))
       .forEach((company) => {
         const letter = company.name?.trim().charAt(0).toUpperCase() || "#";
@@ -173,11 +160,9 @@ export default function CompaniesAndBrands() {
       });
 
     return groups;
-  }, [filteredCompanies]);
+  }, [companies]);
 
-  const unassignedBrands = (brandsByCompany.__unassigned__ || []).filter(
-    (b) => !q || b.name.toLowerCase().includes(q.toLowerCase()),
-  );
+  const unassignedBrands = brandsByCompany.__unassigned__ || [];
 
   function CompanyCard({ company }) {
     const list = brandsByCompany[company._id] || [];
@@ -211,40 +196,11 @@ export default function CompaniesAndBrands() {
             </button>
           </div>
         </div>
-        <div className="p-2 flex flex-wrap space-x-3">
+        <div className="flex-1 p-3">
           {list.length === 0 ? (
             <p className="px-1 py-2 text-sm text-neutral-500">No brands yet.</p>
           ) : (
-            list.map((b) => {
-              const bc = colorFor(b.name);
-              return (
-                <div key={b._id} className="">
-                  <button
-                    onClick={() => router.push(`/projects?brand=${b._id}`)}
-                  >
-                    <span
-                      className={`font-medium hover:underline ${bc.text} text-sm px-6 py-1 rounded-2xl ${bc.bg}`}
-                    >
-                      {b.name}
-                    </span>
-                  </button>
-                  <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                    <button
-                      className="rounded-md px-1.5 py-0.5 text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
-                      onClick={() => openEditBrand(b)}
-                    >
-                      ✎
-                    </button>
-                    <button
-                      className="rounded-md px-1.5 py-0.5 text-xs text-neutral-500 hover:text-red-400"
-                      onClick={() => removeBrand(b)}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-              );
-            })
+            <BrandGrid list={list} onOpen={(b) => router.push(`/projects?brand=${b._id}`)} onEdit={openEditBrand} onRemove={removeBrand} />
           )}
         </div>
         <div className="border-t border-line p-3">
@@ -273,28 +229,19 @@ export default function CompaniesAndBrands() {
         </button>
       </div>
 
-      <div className="mb-6">
-        <input
-          className="input max-w-xs"
-          placeholder="Search companies or brands…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-      </div>
-
       {loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <CardSkeleton />
           <CardSkeleton />
           <CardSkeleton />
         </div>
-      ) : filteredCompanies.length === 0 && unassignedBrands.length === 0 ? (
+      ) : companies.length === 0 && unassignedBrands.length === 0 ? (
         <div className="card">
           <EmptyState
             icon="🏢"
-            title={q ? "Nothing matches your search." : "No companies yet."}
-            hint={q ? undefined : "Create a company, then add brands under it."}
-            action={q ? undefined : "+ New Company"}
+            title="No companies yet."
+            hint="Create a company, then add brands under it."
+            action="+ New Company"
             onAction={openNewCompany}
           />
         </div>
@@ -335,8 +282,15 @@ export default function CompaniesAndBrands() {
                 <div className="h-px flex-1 bg-line" />
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                {/* keep your existing unassigned brands card here */}
+              <div className="card !p-0">
+                <div className="p-3">
+                  <BrandGrid
+                    list={unassignedBrands}
+                    onOpen={(b) => router.push(`/projects?brand=${b._id}`)}
+                    onEdit={openEditBrand}
+                    onRemove={removeBrand}
+                  />
+                </div>
               </div>
             </section>
           )}
@@ -414,5 +368,40 @@ export default function CompaniesAndBrands() {
         )}
       </Modal>
     </Shell>
+  );
+}
+
+function BrandGrid({ list, onOpen, onEdit, onRemove }) {
+  return (
+    <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
+      {list.map((b) => {
+        const bc = colorFor(b.name);
+        return (
+          <div key={b._id} className="group relative">
+            <button className="block w-full" onClick={() => onOpen(b)}>
+              <span
+                className={`block w-full whitespace-normal break-words rounded-2xl px-3 py-1.5 text-center text-xs font-medium hover:underline ${bc.text} ${bc.bg}`}
+              >
+                {b.name}
+              </span>
+            </button>
+            <div className="absolute -right-1.5 -top-1.5 hidden items-center gap-0.5 rounded-full border border-line bg-panel px-1 py-0.5 shadow-sm group-hover:flex">
+              <button
+                className="text-[10px] text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
+                onClick={() => onEdit(b)}
+              >
+                ✎
+              </button>
+              <button
+                className="text-[10px] text-neutral-500 hover:text-red-400"
+                onClick={() => onRemove(b)}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
