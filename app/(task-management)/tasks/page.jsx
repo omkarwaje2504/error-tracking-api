@@ -355,7 +355,7 @@ function TasksInner() {
 
             <div className="card overflow-x-auto !p-0">
               {loading ? (
-                <TableSkeleton rows={6} cols={8} />
+                <TableSkeleton rows={6} cols={7} />
               ) : rows.length === 0 ? (
                 <EmptyState
                     icon="✅"
@@ -375,7 +375,6 @@ function TasksInner() {
                             <th className="px-4 py-3 font-medium">Dept</th>
                             <th className="px-4 py-3 font-medium">Priority</th>
                             <th className="px-4 py-3 font-medium">Due</th>
-                            <th className="px-4 py-3 font-medium">Created by</th>
                             <th className="px-4 py-3 font-medium">Status</th>
                             <th className="px-4 py-3 text-right font-medium">Actions</th>
                         </tr>
@@ -442,7 +441,6 @@ function TasksInner() {
                                         </span>
                                     ) : <span className="text-neutral-600">—</span>}
                                 </td>
-                                <td className="px-4 py-3 text-neutral-500">{t.createdBy?.name || '—'}</td>
                                 <td className="px-4 py-3">
                                     <div className="flex items-center gap-1.5">
                                         <span className={`rounded-full px-2.5 py-1 text-xs ${statusMeta(t.status).className}`}>
