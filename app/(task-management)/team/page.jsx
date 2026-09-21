@@ -1,16 +1,23 @@
 'use client';
 import { useEffect, useMemo, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { FiEye, FiEyeOff } from 'react-icons/fi';
 import Shell from '@/components/Shell';
 import EmptyState from '@/components/EmptyState';
 import { CardSkeleton } from '@/components/Skeleton';
 import { isOverdue, pointsFor } from '@/lib/taskDisplay';
 import { getSession } from '@/lib/session';
 import { getReference } from '@/lib/referenceCache';
+import { getTeamSetting, setTeamSetting } from '@/lib/teamSettings';
+import { toast } from '@/lib/toast';
+import { colorFor } from '@/lib/colors';
 
 const TEAMS = ['graphic', 'video', 'frontend', 'backend', 'app'];
-const MEDALS = ['🥇', '🥈', '🥉'];
+// Empty string stands for "no product type set" on the task's project —
+// kept in the hidden-types list the same way the API's excludeProductTypes
+// param expects it. Kept separate from the Tasks/Projects hidden-types
+// setting since this page filters member stats, not a task list.
+const NO_TYPE = '';
 
 function dayKey(d) { return new Date(d).toISOString().slice(0, 10); }
 
@@ -40,15 +47,6 @@ function memberStats(tasks) {
     };
 }
 
-function motivationalLine(rank, stats) {
-    if (stats.streak >= 5) return `🔥 ${stats.streak}-day streak!`;
-    if (rank === 0 && stats.points > 0) return '👑 Leading the pack';
-    if (stats.todayCount >= 3) return '⚡ On fire today';
-    if (stats.completedCount === 0) return '🌱 Getting started';
-    if (stats.streak >= 2) return `✨ ${stats.streak} days running`;
-    return '💪 Keep going';
-}
-
 function TeamStructureInner() {
     const router = useRouter();
     const params = useSearchParams();
@@ -59,8 +57,26 @@ function TeamStructureInner() {
     const [dept, setDept] = useState(params.get('dept') || '');
     const [q, setQ] = useState('');
     const [showCompletedFor, setShowCompletedFor] = useState({});
+    const [productTypes, setProductTypes] = useState([]);
+    const [productTypeFilter, setProductTypeFilter] = useState('');
+    const [hiddenProductTypes, setHiddenProductTypes] = useState([]);
+    const [showProductTypeFilter, setShowProductTypeFilter] = useState(true);
+    const [settingsLoaded, setSettingsLoaded] = useState(false);
 
     useEffect(() => { load(); }, []);
+
+    useEffect(() => {
+        if (!settingsLoaded) return;
+        (async () => {
+            setLoading(true);
+            const p = new URLSearchParams();
+            if (productTypeFilter) p.set('productType', productTypeFilter);
+            else if (hiddenProductTypes.length) p.set('excludeProductTypes', hiddenProductTypes.join(','));
+            const qs = p.toString();
+            setTasks(await (await fetch(`/api/tasks${qs ? `?${qs}` : ''}`)).json());
+            setLoading(false);
+        })();
+    }, [productTypeFilter, hiddenProductTypes, settingsLoaded]);
 
     async function load() {
         setLoading(true);
@@ -71,8 +87,53 @@ function TeamStructureInner() {
         if (u.role === 'lead') setDept(u.team);
 
         setUsers(await getReference('users'));
-        setTasks(await (await fetch('/api/tasks')).json());
-        setLoading(false);
+        setProductTypes(await getReference('productTypes'));
+
+        const [savedFilter, savedHidden, savedShow] = await Promise.all([
+            getTeamSetting('teamStructureProductTypeFilter', ''),
+            getTeamSetting('teamStructureHiddenProductTypes', []),
+            getTeamSetting('teamStructureShowProductTypeFilter', true),
+        ]);
+        setProductTypeFilter(savedFilter || '');
+        setHiddenProductTypes(savedHidden || []);
+        setShowProductTypeFilter(savedShow !== false);
+        setSettingsLoaded(true);
+    }
+
+    async function selectProductType(name) {
+        setProductTypeFilter(name);
+        const nextHidden = name ? hiddenProductTypes.filter((t) => t !== name) : hiddenProductTypes;
+        if (nextHidden !== hiddenProductTypes) setHiddenProductTypes(nextHidden);
+        const ok = await Promise.all([
+            setTeamSetting('teamStructureProductTypeFilter', name),
+            nextHidden !== hiddenProductTypes ? setTeamSetting('teamStructureHiddenProductTypes', nextHidden) : Promise.resolve(true),
+        ]);
+        if (ok.some((x) => !x)) toast.error('Failed to save.');
+    }
+
+    async function toggleProductType(name) {
+        const next = hiddenProductTypes.includes(name) ? hiddenProductTypes.filter((t) => t !== name) : [...hiddenProductTypes, name];
+        setHiddenProductTypes(next);
+        if (!(await setTeamSetting('teamStructureHiddenProductTypes', next))) toast.error('Failed to save.');
+    }
+
+    async function clearTypeFilters() {
+        setProductTypeFilter('');
+        setHiddenProductTypes([]);
+        const ok = await Promise.all([
+            setTeamSetting('teamStructureProductTypeFilter', ''),
+            setTeamSetting('teamStructureHiddenProductTypes', []),
+        ]);
+        if (ok.some((x) => !x)) toast.error('Failed to save.');
+    }
+
+    async function toggleProductTypeFilterVisibility() {
+        const next = !showProductTypeFilter;
+        setShowProductTypeFilter(next);
+        const ok = await setTeamSetting('teamStructureShowProductTypeFilter', next);
+        if (!ok) return toast.error('Failed to save.');
+        // Hiding the filter also clears it, so it doesn't stay silently applied.
+        if (!next && (productTypeFilter || hiddenProductTypes.length)) clearTypeFilters();
     }
 
     const isHead = user?.role === 'head';
@@ -104,22 +165,10 @@ function TeamStructureInner() {
             .sort((a, b) => b.stats.points - a.stats.points);
     }, [members, tasksByUser]);
 
-    const chartData = useMemo(() => {
-        const memberIds = new Set(members.map((m) => m._id));
-        const days = [];
-        for (let i = 6; i >= 0; i--) {
-            const d = new Date(); d.setDate(d.getDate() - i);
-            days.push({ key: dayKey(d), label: d.toLocaleDateString(undefined, { weekday: 'short' }) });
-        }
-        const counts = Object.fromEntries(days.map((d) => [d.key, 0]));
-        for (const t of tasks) {
-            if (t.status !== 'completed' || !t.completedAt) continue;
-            if (!t.assignedTo?.some((a) => memberIds.has(a._id))) continue;
-            const key = dayKey(t.completedAt);
-            if (key in counts) counts[key]++;
-        }
-        return days.map((d) => ({ name: d.label, Completed: counts[d.key] }));
-    }, [tasks, members]);
+    const typeOptions = useMemo(
+        () => [{ _id: '__no-type__', name: 'No type', key: NO_TYPE }, ...productTypes.map((t) => ({ ...t, key: t.name }))],
+        [productTypes]
+    );
 
     return (
         <Shell user={user} onAdd={() => router.push('/tasks')}>
@@ -146,10 +195,49 @@ function TeamStructureInner() {
                         {TEAMS.map((t) => <option key={t} value={t}>{t}</option>)}
                     </select>
                 )}
-                {(q || (isHead && dept)) && (
-                    <button className="btn-ghost" onClick={() => { setQ(''); if (isHead) setDept(''); }}>Clear</button>
+                {showProductTypeFilter && (
+                    <select className="input w-auto" value={productTypeFilter} onChange={(e) => selectProductType(e.target.value)}>
+                        <option value="">All product types</option>
+                        {productTypes.map((t) => <option key={t._id} value={t.name}>{t.name}</option>)}
+                    </select>
+                )}
+                <button
+                    type="button"
+                    className="rounded-lg p-2 text-neutral-500 hover:bg-panel2 hover:text-neutral-800 dark:hover:text-neutral-200"
+                    title={showProductTypeFilter ? 'Hide product type filter' : 'Show product type filter'}
+                    onClick={toggleProductTypeFilterVisibility}
+                >
+                    {showProductTypeFilter ? <FiEye size={16} /> : <FiEyeOff size={16} />}
+                </button>
+                {(q || (isHead && dept) || productTypeFilter || hiddenProductTypes.length > 0) && (
+                    <button className="btn-ghost" onClick={() => { setQ(''); if (isHead) setDept(''); clearTypeFilters(); }}>Clear</button>
                 )}
             </div>
+
+            {showProductTypeFilter && typeOptions.length > 1 && (
+                <div className="mb-4 flex flex-wrap items-center gap-1.5">
+                    <span className="mr-1 text-xs font-medium uppercase tracking-wider text-neutral-500">Type</span>
+                    {typeOptions.map((t) => {
+                        const hidden = hiddenProductTypes.includes(t.key);
+                        const c = colorFor(t.name);
+                        return (
+                            <button
+                                key={t._id}
+                                type="button"
+                                onClick={() => toggleProductType(t.key)}
+                                title={hidden ? `Show "${t.name}" tasks` : `Hide "${t.name}" tasks`}
+                                className={`rounded-full border px-2.5 py-1 text-xs transition ${
+                                    hidden
+                                        ? 'border-line text-neutral-400 opacity-50 line-through'
+                                        : `border-transparent ${c.bg} ${c.text}`
+                                }`}
+                            >
+                                {t.name}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
 
             {loading ? (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -159,43 +247,6 @@ function TeamStructureInner() {
                 <EmptyState icon="🧑‍🤝‍🧑" title={`No team members${dept ? ` in ${dept}` : ''}${q ? ' match your search' : ''}.`} />
             ) : (
                 <>
-                    {/* Performance overview */}
-                    <div className="mb-8 grid grid-cols-1 gap-4 lg:grid-cols-5">
-                        <div className="card lg:col-span-2">
-                            <p className="mb-3 font-semibold">🏆 Leaderboard</p>
-                            <div className="space-y-1.5">
-                                {leaderboard.slice(0, 8).map((row, i) => (
-                                    <div key={row.user._id} className="flex items-center gap-2.5 rounded-xl px-2 py-2 hover:bg-panel2/60">
-                                        <span className="w-6 shrink-0 text-center text-sm">{MEDALS[i] || i + 1}</span>
-                                        <div className="min-w-0 flex-1">
-                                            <p className="truncate text-sm font-medium">{row.user.name}</p>
-                                            <p className="truncate text-xs text-neutral-500">{motivationalLine(i, row.stats)}</p>
-                                        </div>
-                                        <span className="shrink-0 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs font-semibold text-[var(--accent)]">
-                                            {row.stats.points} pts
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                        <div className="card lg:col-span-3">
-                            <p className="mb-3 font-semibold">📈 Completed this week</p>
-                            <div className="h-48">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={chartData}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-line)" vertical={false} />
-                                        <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#8b8b96' }} axisLine={false} tickLine={false} />
-                                        <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: '#8b8b96' }} axisLine={false} tickLine={false} width={24} />
-                                        <Tooltip
-                                            contentStyle={{ background: 'var(--color-panel)', border: '1px solid var(--color-line)', borderRadius: 10, fontSize: 12 }}
-                                        />
-                                        <Bar dataKey="Completed" fill="#818cf8" radius={[6, 6, 0, 0]} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </div>
-                        </div>
-                    </div>
-
                     {/* Member cards */}
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                         {leaderboard.map(({ user: m, stats }) => {
