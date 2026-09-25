@@ -1,10 +1,13 @@
 'use client';
 import { useEffect, useState, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { FiEdit2, FiTrash2, FiFlag } from 'react-icons/fi';
 import Shell from '@/components/Shell';
 import Modal from '@/components/Modal';
 import ProgressModal from '@/components/ProgressModal';
 import SubtaskModal from '@/components/SubtaskModal';
+import BugModal from '@/components/BugModal';
+import EvideoModal from '@/components/EvideoModal';
 import EmptyState from '@/components/EmptyState';
 import FileButton from '@/components/FileButton';
 import { TableSkeleton } from '@/components/Skeleton';
@@ -15,13 +18,18 @@ import { getReference } from '@/lib/referenceCache';
 import { getTeamSetting, setTeamSetting } from '@/lib/teamSettings';
 import { uploadFilesToR2 } from '@/lib/upload';
 import { colorFor } from '@/lib/colors';
-import { PRIORITY_META, PRIORITY_ORDER, priorityMeta, isOverdue, formatDate, pointsFor, DEPARTMENTS, departmentLabel, statusMeta, canManageTasks } from '@/lib/taskDisplay';
+import { PRIORITY_META, PRIORITY_ORDER, priorityMeta, isOverdue, formatDate, pointsFor, DEPARTMENTS, departmentLabel, canManageTasks } from '@/lib/taskDisplay';
 
 const EMPTY_FORM = {
     title: '', description: '', project: '', assignedTo: [],
-    trackProgress: false, unit: '', target: '', department: '',
-    priority: 'medium', dueDate: '', attachments: [],
+    trackProgress: false, unit: '', target: '', trackJ2K: false, department: '',
+    priority: 'medium', dueDate: '', attachments: [], isEvideo: false,
 };
+
+/** Small inline spinner shown under a button while its action is in flight. */
+function Spinner() {
+    return <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />;
+}
 
 // Empty string stands for "no product type set" on the task's project —
 // kept in the hidden-types list the same way the API's excludeProductTypes
@@ -49,6 +57,12 @@ function TasksInner() {
     const [uploadError, setUploadError] = useState('');
     const [progressTask, setProgressTask] = useState(null);
     const [subtaskParent, setSubtaskParent] = useState(null);
+    const [bugParent, setBugParent] = useState(null);
+    const [evideoTask, setEvideoTask] = useState(null);
+    // { [taskId]: 'pin'|'toggle'|'approve'|'revert'|'delete' } — drives the
+    // small per-button spinner so a click gives instant feedback without
+    // touching `loading` (which would blank the whole table again).
+    const [rowBusy, setRowBusy] = useState({});
     const [loading, setLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -136,6 +150,16 @@ function TasksInner() {
         setLoading(false);
     }
 
+    // Re-fetches just the task list in place, without flipping `loading` —
+    // used after row-level actions (toggle/complete/revert/delete/edit) so
+    // the table updates its data quietly instead of blanking out to the
+    // skeleton and repainting the whole thing.
+    async function refreshTasks() {
+        const data = await (await fetch(`/api/tasks?${buildQuery(1)}`)).json();
+        setTasks(data.tasks);
+        setTotal(data.total);
+    }
+
     async function loadMore() {
         setLoadingMore(true);
         const nextPage = Math.floor(tasks.length / PAGE_SIZE) + 1;
@@ -179,9 +203,20 @@ function TasksInner() {
             });
             if (!res.ok) return toast.error('Failed to save task.');
             toast.success(edit ? 'Task updated.' : 'Task created.');
-            closeModal(); load();
+            closeModal(); refreshTasks();
         } finally {
             setSaving(false);
+        }
+    }
+
+    // Runs `fn` while flagging this row as busy with `action`, so the row's
+    // button can show a small spinner instead of the whole table reloading.
+    async function withBusy(id, action, fn) {
+        setRowBusy((b) => ({ ...b, [id]: action }));
+        try {
+            await fn();
+        } finally {
+            setRowBusy((b) => { const n = { ...b }; delete n[id]; return n; });
         }
     }
 
@@ -190,25 +225,29 @@ function TasksInner() {
     // (below) can move it, and that's lead/head-only server-side too.
     async function toggleDone(t) {
         if (t.status === 'completed') return;
-        const next = t.status === 'pending' ? 'done' : 'pending';
-        const res = await fetch(`/api/tasks/${t._id}`, {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: next }),
+        await withBusy(t._id, 'toggle', async () => {
+            const next = t.status === 'pending' ? 'done' : 'pending';
+            const res = await fetch(`/api/tasks/${t._id}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: next }),
+            });
+            if (!res.ok) return toast.error('Failed to update task.');
+            toast.success(next === 'done' ? 'Marked done.' : 'Reopened.');
+            await refreshTasks();
         });
-        if (!res.ok) return toast.error('Failed to update task.');
-        toast.success(next === 'done' ? 'Marked done.' : 'Reopened.');
-        load();
     }
 
     async function approve(t) {
-        const res = await fetch(`/api/tasks/${t._id}`, {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'completed' }),
+        await withBusy(t._id, 'approve', async () => {
+            const res = await fetch(`/api/tasks/${t._id}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: 'completed' }),
+            });
+            const data = await res.json();
+            if (!res.ok) return toast.error(data.error || 'Failed to complete task.');
+            toast.success('Task marked complete.');
+            await refreshTasks();
         });
-        const data = await res.json();
-        if (!res.ok) return toast.error(data.error || 'Failed to complete task.');
-        toast.success('Task marked complete.');
-        load();
     }
 
     async function revert(t) {
@@ -216,23 +255,42 @@ function TasksInner() {
             placeholder: 'Feedback for the assignee…', confirmLabel: 'Send back', required: true,
         });
         if (!note) return;
-        const res = await fetch(`/api/tasks/${t._id}`, {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'pending', revertNote: note }),
+        await withBusy(t._id, 'revert', async () => {
+            const res = await fetch(`/api/tasks/${t._id}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: 'pending', revertNote: note }),
+            });
+            const data = await res.json();
+            if (!res.ok) return toast.error(data.error || 'Failed to send task back.');
+            toast.success('Sent back with feedback.');
+            await refreshTasks();
         });
-        const data = await res.json();
-        if (!res.ok) return toast.error(data.error || 'Failed to send task back.');
-        toast.success('Sent back with feedback.');
-        load();
     }
 
     async function remove(id, title) {
         const ok = await confirmDialog(`Soft delete "${title}"? It can be restored later.`, { danger: true, confirmLabel: 'Delete' });
         if (!ok) return;
-        const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
-        if (!res.ok) return toast.error('Failed to delete task.');
-        toast.success('Task deleted.');
-        load();
+        await withBusy(id, 'delete', async () => {
+            const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+            if (!res.ok) return toast.error('Failed to delete task.');
+            toast.success('Task deleted.');
+            await refreshTasks();
+        });
+    }
+
+    async function togglePin(t) {
+        const pinned = !t.pinned;
+        setTasks((list) => list.map((x) => (x._id === t._id ? { ...x, pinned } : x)));
+        await withBusy(t._id, 'pin', async () => {
+            const res = await fetch(`/api/tasks/${t._id}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pinned }),
+            });
+            if (!res.ok) {
+                toast.error('Failed to update pin.');
+                await refreshTasks();
+            }
+        });
     }
 
     function toggleAssign(id) {
@@ -261,6 +319,7 @@ function TasksInner() {
     // Status/priority/assignee are already applied server-side — this just orders the current page.
     const rows = useMemo(() => {
         return [...tasks].sort((a, b) => {
+            if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
             const aOverdue = isOverdue(a), bOverdue = isOverdue(b);
             if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
             const ap = PRIORITY_ORDER[a.priority] ?? 2, bp = PRIORITY_ORDER[b.priority] ?? 2;
@@ -279,14 +338,28 @@ function TasksInner() {
                 task={progressTask}
                 open={!!progressTask}
                 onClose={() => setProgressTask(null)}
-                onChange={load}
+                onChange={refreshTasks}
             />
             <SubtaskModal
                 task={subtaskParent}
                 users={users}
                 open={!!subtaskParent}
                 onClose={() => setSubtaskParent(null)}
-                onChange={load}
+                onChange={refreshTasks}
+            />
+            <BugModal
+                task={bugParent}
+                users={users}
+                open={!!bugParent}
+                onClose={() => setBugParent(null)}
+                onChange={refreshTasks}
+            />
+            <EvideoModal
+                task={evideoTask}
+                users={users}
+                open={!!evideoTask}
+                onClose={() => setEvideoTask(null)}
+                onChange={refreshTasks}
             />
 
             {/* Filter bar */}
@@ -368,20 +441,33 @@ function TasksInner() {
                 <table className="w-full min-w-[720px] text-sm">
                     <thead>
                         <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-neutral-500">
+                            <th className="w-8 px-2 py-3 font-medium" aria-hidden />
                             <th className="px-4 py-3 font-medium">Done</th>
                             <th className="px-4 py-3 font-medium">Task</th>
                             <th className="px-4 py-3 font-medium">Project</th>
                             <th className="px-4 py-3 font-medium">Assignees</th>
-                            <th className="px-4 py-3 font-medium">Dept</th>
-                            <th className="px-4 py-3 font-medium">Priority</th>
                             <th className="px-4 py-3 font-medium">Due</th>
-                            <th className="px-4 py-3 font-medium">Status</th>
                             <th className="px-4 py-3 text-right font-medium">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {rows.map((t) => (
-                            <tr key={t._id} className="border-b border-line/60 last:border-0 hover:bg-panel2/40">
+                        {rows.map((t) => {
+                          // A pending task is "critical" when it's overdue or flagged urgent —
+                          // either signal alone is worth calling out with red row text.
+                          const critical = t.status === 'pending' && (isOverdue(t) || t.priority === 'urgent');
+                          return (
+                            <tr key={t._id} className="border-b border-line/60 last:border-0 odd:bg-panel2/40 hover:bg-panel2/70 dark:odd:bg-panel2/25">
+                                <td className="w-8 px-2 py-3 text-center">
+                                    <button
+                                        type="button"
+                                        onClick={() => togglePin(t)}
+                                        title={t.pinned ? 'Unpin' : 'Pin to top'}
+                                        className={`text-base leading-none transition ${t.pinned ? 'text-amber-400' : 'text-neutral-300 hover:text-neutral-400 dark:text-neutral-600 dark:hover:text-neutral-500'}`}
+                                    >
+                                        {t.pinned ? '★' : '☆'}
+                                    </button>
+                                    {rowBusy[t._id] === 'pin' && <div className="mt-1 flex justify-center"><Spinner /></div>}
+                                </td>
                                 <td className="px-4 py-3">
                                     {t.trackProgress ? (
                                         <div className="flex flex-col items-start gap-0.5">
@@ -396,43 +482,55 @@ function TasksInner() {
                                             )}
                                         </div>
                                     ) : (
-                                        <input
-                                            type="checkbox"
-                                            className="h-[18px] w-[18px] accent-neutral-900 dark:accent-white disabled:opacity-40"
-                                            checked={t.status !== 'pending'}
-                                            disabled={t.status === 'completed'}
-                                            onChange={() => toggleDone(t)}
-                                            title={t.status === 'completed' ? 'Completed — a lead can revert it' : 'Mark done'}
-                                        />
+                                        <>
+                                            <input
+                                                type="checkbox"
+                                                className="h-[18px] w-[18px] accent-neutral-900 dark:accent-white disabled:opacity-40"
+                                                checked={t.status !== 'pending'}
+                                                disabled={t.status === 'completed' || rowBusy[t._id] === 'toggle'}
+                                                onChange={() => toggleDone(t)}
+                                                title={t.status === 'completed' ? 'Completed — a lead can revert it' : 'Mark done'}
+                                            />
+                                            {rowBusy[t._id] === 'toggle' && <div className="mt-1"><Spinner /></div>}
+                                        </>
                                     )}
                                 </td>
 
                                 <td className="px-4 py-3">
-                                    <span className={t.status !== 'pending' ? 'text-neutral-500 line-through' : 'font-medium'}>
-                                        {t.title}
-                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                        <FiFlag
+                                            size={13}
+                                            className={`shrink-0 ${priorityMeta(t.priority).iconClassName}`}
+                                            title={priorityMeta(t.priority).label}
+                                        />
+                                        <span className={t.status !== 'pending' ? 'text-neutral-500 line-through' : critical ? 'font-semibold text-red-500' : 'font-medium'}>
+                                            {t.title}
+                                        </span>
+                                        {t.status === 'completed' && (
+                                            <span className="shrink-0 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">+{pointsFor(t)} pts</span>
+                                        )}
+                                    </div>
                                     {t.status === 'pending' && t.revertNote && (
                                         <p className="mt-0.5 truncate text-xs text-amber-500" title={t.revertNote.text}>
                                             ⚠ {t.revertNote.byName}: {t.revertNote.text}
                                         </p>
                                     )}
                                 </td>
-                                <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
-                                    {t.project?.name || '—'}
-                                    {t.project?.projectType && (
-                                        <span className={`ml-1.5 rounded-full px-2 py-0.5 text-[11px] ${colorFor(t.project.projectType).bg} ${colorFor(t.project.projectType).text}`}>
-                                            {t.project.projectType}
-                                        </span>
+                                <td className={`px-4 py-3 ${critical ? 'text-red-500' : 'text-neutral-600 dark:text-neutral-400'}`}>
+                                    <div className="flex items-center gap-1.5">
+                                        <span>{t.project?.name || '—'}</span>
+                                        {t.project?.projectType && (
+                                            <span className={`rounded-full px-2 py-0.5 text-[11px] ${colorFor(t.project.projectType).bg} ${colorFor(t.project.projectType).text}`}>
+                                                {t.project.projectType}
+                                            </span>
+                                        )}
+                                    </div>
+                                    {t.department && (
+                                        <p className={`mt-0.5 text-xs ${critical ? 'text-red-400' : 'text-neutral-500'}`}>{departmentLabel(t.department)}</p>
                                     )}
                                 </td>
-                                <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
+                                <td className={`px-4 py-3 ${critical ? 'text-red-500' : 'text-neutral-600 dark:text-neutral-400'}`}>
                                     {t.assignedTo?.map((u) => u.name).join(', ') || 'Unassigned'}
-                                </td>
-                                <td className="px-4 py-3 text-neutral-500">{t.department ? departmentLabel(t.department) : '—'}</td>
-                                <td className="px-4 py-3">
-                                    <span className={`rounded-full px-2.5 py-1 text-xs ${priorityMeta(t.priority).className}`}>
-                                        {priorityMeta(t.priority).label}
-                                    </span>
                                 </td>
                                 <td className="px-4 py-3">
                                     {t.dueDate ? (
@@ -442,22 +540,35 @@ function TasksInner() {
                                     ) : <span className="text-neutral-600">—</span>}
                                 </td>
                                 <td className="px-4 py-3">
-                                    <div className="flex items-center gap-1.5">
-                                        <span className={`rounded-full px-2.5 py-1 text-xs ${statusMeta(t.status).className}`}>
-                                            {statusMeta(t.status).label}
-                                        </span>
-                                        {t.status === 'completed' && (
-                                            <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">+{pointsFor(t)} pts</span>
-                                        )}
-                                    </div>
-                                </td>
-                                <td className="px-4 py-3">
-                                    <div className="flex flex-wrap justify-end gap-2">
+                                    <div className="flex flex-wrap items-start justify-end gap-2">
                                         {isManager && t.status === 'done' && (
-                                            <button className="btn-ghost !px-3 !py-1.5 !text-xs !text-green-500" onClick={() => approve(t)}>✓ Complete</button>
+                                            <div className="flex flex-col items-center">
+                                                <button className="btn-ghost !px-3 !py-1.5 !text-xs !text-green-500" disabled={rowBusy[t._id] === 'approve'} onClick={() => approve(t)}>✓ Complete</button>
+                                                {rowBusy[t._id] === 'approve' && <Spinner />}
+                                            </div>
                                         )}
                                         {isManager && (t.status === 'done' || t.status === 'completed') && (
-                                            <button className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={() => revert(t)}>↩ Revert</button>
+                                            <div className="flex flex-col items-center">
+                                                <button className="btn-ghost !px-3 !py-1.5 !text-xs" disabled={rowBusy[t._id] === 'revert'} onClick={() => revert(t)}>↩ Revert</button>
+                                                {rowBusy[t._id] === 'revert' && <Spinner />}
+                                            </div>
+                                        )}
+                                        {t.isEvideo && (() => {
+                                            const total = t.evideoRows?.length || 0;
+                                            const done = t.evideoRows?.filter((r) => r.textSettingDone && r.maleDone && r.femaleDone).length || 0;
+                                            return (
+                                                <button className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={() => setEvideoTask(t)}>
+                                                    🌐 Languages{total ? ` (${done}/${total})` : ''}
+                                                </button>
+                                            );
+                                        })()}
+                                        {['frontend', 'backend', 'app'].includes(t.department) && (
+                                            <button
+                                                className={`btn-ghost !px-3 !py-1.5 !text-xs ${t.bugCount?.total > t.bugCount?.done ? '!text-red-500' : ''}`}
+                                                onClick={() => setBugParent(t)}
+                                            >
+                                                Bugs{t.bugCount?.total ? ` (${t.bugCount.done}/${t.bugCount.total})` : ''}
+                                            </button>
                                         )}
                                         <button
                                             className="btn-ghost !px-3 !py-1.5 !text-xs"
@@ -466,7 +577,8 @@ function TasksInner() {
                                             Subtasks{t.subCount?.total ? ` (${t.subCount.done}/${t.subCount.total})` : ''}
                                         </button>
                                         <button
-                                            className="btn-ghost !px-3 !py-1.5 !text-xs"
+                                            className="btn-ghost !px-2 !py-1.5"
+                                            title="Edit"
                                             onClick={() => {
                                                 setEdit(t._id);
                                                 setUploadError('');
@@ -478,21 +590,29 @@ function TasksInner() {
                                                     trackProgress: !!t.trackProgress,
                                                     unit: t.unit || '',
                                                     target: t.target ?? '',
+                                                    trackJ2K: !!t.trackJ2K,
                                                     department: t.department || '',
                                                     priority: t.priority || 'medium',
                                                     dueDate: t.dueDate ? String(t.dueDate).slice(0, 10) : '',
                                                     attachments: t.attachments || [],
+                                                    isEvideo: !!t.isEvideo,
                                                 });
                                                 setOpen(true);
                                             }}
                                         >
-                                            Edit
+                                            <FiEdit2 size={14} />
                                         </button>
-                                        <button className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={() => remove(t._id, t.title)}>Delete</button>
+                                        <div className="flex flex-col items-center">
+                                            <button className="btn-ghost !px-2 !py-1.5 !text-red-500" title="Delete" disabled={rowBusy[t._id] === 'delete'} onClick={() => remove(t._id, t.title)}>
+                                                <FiTrash2 size={14} />
+                                            </button>
+                                            {rowBusy[t._id] === 'delete' && <Spinner />}
+                                        </div>
                                     </div>
                                 </td>
                             </tr>
-                        ))}
+                          );
+                        })}
                     </tbody>
                 </table>
               )}
@@ -555,7 +675,7 @@ function TasksInner() {
                 </div>
 
                 {form.trackProgress && (
-                    <div className="mb-5 flex gap-3">
+                    <div className="mb-3.5 flex gap-3">
                         <div className="flex-1">
                             <label className="label">Unit</label>
                             <input className="input" placeholder="RxPad" value={form.unit}
@@ -568,6 +688,35 @@ function TasksInner() {
                         </div>
                     </div>
                 )}
+                {form.trackProgress && (
+                    <div className="mb-3.5">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+                            <input
+                                type="checkbox"
+                                className="h-4 w-4 accent-neutral-900 dark:accent-white"
+                                checked={form.trackJ2K}
+                                onChange={(e) => setForm({ ...form, trackJ2K: e.target.checked })}
+                            />
+                            Also track J2K file generation count (PVR)
+                        </label>
+                    </div>
+                )}
+                <div className="mb-5">
+                    <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+                        <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-neutral-900 dark:accent-white"
+                            checked={form.isEvideo}
+                            onChange={(e) => setForm({ ...form, isEvideo: e.target.checked })}
+                        />
+                        Is this an EVideo language generation task?
+                    </label>
+                    {form.isEvideo && (
+                        <p className="mt-1 text-xs text-neutral-500">
+                            {edit ? 'Manage languages from the "🌐 Languages" button on this task once saved.' : 'Add languages from the "🌐 Languages" button after creating this task.'}
+                        </p>
+                    )}
+                </div>
                 <div className="mb-5">
                     <label className="label">Assign To (multiple)</label>
                     <div className="flex flex-wrap gap-2">

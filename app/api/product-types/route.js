@@ -9,7 +9,7 @@ export async function GET(req) {
     const db = await connectDB();
     const since = new URL(req.url).searchParams.get('since');
     const types = await db.collection('productTypes')
-        .find(sinceMatch(since)).sort({ name: 1 }).toArray();
+        .find(sinceMatch(since)).sort({ createdAt: -1 }).toArray();
     return NextResponse.json(types);
 }
 

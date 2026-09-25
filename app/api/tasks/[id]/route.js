@@ -22,6 +22,7 @@ export async function PUT(req, { params }) {
     if (body.trackProgress !== undefined) set.trackProgress = !!body.trackProgress;
     if (body.unit !== undefined) set.unit = body.unit;
     if (body.target !== undefined) set.target = body.target ? Number(body.target) : null;
+    if (body.trackJ2K !== undefined) set.trackJ2K = !!body.trackJ2K;
     if (body.parentTask !== undefined) set.parentTask = body.parentTask ? oid(body.parentTask) : null;
     if (body.department !== undefined) set.department = body.department;
     if (body.priority !== undefined) set.priority = ['low', 'medium', 'high', 'urgent'].includes(body.priority) ? body.priority : 'medium';
@@ -29,6 +30,9 @@ export async function PUT(req, { params }) {
     if (body.stageType !== undefined) set.stageType = body.stageType || null;
     if (body.stageId !== undefined) set.stageId = body.stageId || null;
     if (body.attachments !== undefined) set.attachments = body.attachments;
+    if (body.pinned !== undefined) set.pinned = !!body.pinned;
+    if (body.isEvideo !== undefined) set.isEvideo = !!body.isEvideo;
+    if (body.evideoRows !== undefined) set.evideoRows = Array.isArray(body.evideoRows) ? body.evideoRows : [];
 
     // Status: team members move a top-level task freely between pending and
     // done. Only a lead/head can promote it to completed, or move it *out*

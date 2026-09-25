@@ -21,8 +21,14 @@ export async function PUT(req, { params }) {
         return NextResponse.json({ error: 'Only whoever added this credential (or a lead) can edit it.' }, { status: 403 });
     }
 
-    const { service, name, username, password, notes } = await req.json();
+    const {
+        service, name, username, password, notes,
+        billingStatus, billingAmount, nextPaymentDate, cardLast4,
+    } = await req.json();
     if (service !== undefined && !service.trim()) return NextResponse.json({ error: 'Service is required' }, { status: 400 });
+    if (cardLast4 && !/^\d{4}$/.test(cardLast4)) {
+        return NextResponse.json({ error: 'Card last 4 digits must be exactly 4 digits' }, { status: 400 });
+    }
 
     const set = { updatedAt: new Date() };
     if (service !== undefined) set.service = service.trim();
@@ -30,6 +36,10 @@ export async function PUT(req, { params }) {
     if (username !== undefined) set.username = username;
     if (notes !== undefined) set.notes = notes;
     if (password) set.encryptedPassword = encrypt(password); // blank = keep existing password
+    if (billingStatus !== undefined) set.billingStatus = billingStatus === 'suspended' ? 'suspended' : 'active';
+    if (billingAmount !== undefined) set.billingAmount = billingAmount;
+    if (nextPaymentDate !== undefined) set.nextPaymentDate = nextPaymentDate || null;
+    if (cardLast4 !== undefined) set.cardLast4 = cardLast4;
 
     await db.collection('credentials').updateOne({ _id: oid(id) }, { $set: set });
     const { encryptedPassword, accessLog, ...safe } = await db.collection('credentials').findOne({ _id: oid(id) });

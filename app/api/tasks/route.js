@@ -107,8 +107,9 @@ export async function GET(req) {
         {
             $project: {
                 title: 1, description: 1, status: 1, createdAt: 1, completedAt: 1, revertNote: 1,
-                trackProgress: 1, unit: 1, target: 1, parentTask: 1, department: 1,
-                priority: 1, dueDate: 1, stageType: 1, stageId: 1, attachments: 1,
+                trackProgress: 1, unit: 1, target: 1, trackJ2K: 1, parentTask: 1, department: 1,
+                priority: 1, dueDate: 1, stageType: 1, stageId: 1, attachments: 1, pinned: 1,
+                isEvideo: 1, evideoRows: 1,
                 'project._id': 1, 'project.name': 1, 'project.projectType': 1,
                 'assignedTo._id': 1, 'assignedTo.name': 1, 'assignedTo.team': 1,
                 'createdBy._id': 1, 'createdBy.name': 1,
@@ -120,7 +121,7 @@ export async function GET(req) {
                 let: { taskId: '$_id' },
                 pipeline: [
                     { $match: { $expr: { $eq: ['$task', '$$taskId'] }, deleted: { $ne: true } } },
-                    { $group: { _id: null, added: { $sum: '$added' }, completed: { $sum: '$completed' }, declined: { $sum: '$declined' } } },
+                    { $group: { _id: null, added: { $sum: '$added' }, completed: { $sum: '$completed' }, declined: { $sum: '$declined' }, j2k: { $sum: '$j2k' } } },
                 ],
                 as: 'progress',
             }
@@ -162,7 +163,7 @@ export async function GET(req) {
 
         {
             $addFields: {
-                progress: { $ifNull: [{ $arrayElemAt: ['$progress', 0] }, { added: 0, completed: 0, declined: 0 }] },
+                progress: { $ifNull: [{ $arrayElemAt: ['$progress', 0] }, { added: 0, completed: 0, declined: 0, j2k: 0 }] },
                 subCount: { $ifNull: [{ $arrayElemAt: ['$subCount', 0] }, { total: 0, done: 0 }] },
                 bugCount: { $ifNull: [{ $arrayElemAt: ['$bugCount', 0] }, { total: 0, done: 0 }] },
             }
@@ -180,8 +181,9 @@ export async function POST(req) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const db = await connectDB();
     const {
-        title, description, project, assignedTo, trackProgress, unit, target,
+        title, description, project, assignedTo, trackProgress, unit, target, trackJ2K,
         parentTask, department, priority, dueDate, stageType, stageId, attachments, kind,
+        isEvideo, evideoRows,
     } = await req.json();
     if (!title || !title.trim()) {
         return NextResponse.json({ error: 'Title is required' }, { status: 400 });
@@ -199,6 +201,9 @@ export async function POST(req) {
         trackProgress: !!trackProgress,
         unit: unit || '',
         target: target ? Number(target) : null,
+        // PVR-style tracking: same daily add/done/decline log as any other
+        // trackProgress task, plus a J2K file generation count column.
+        trackJ2K: !!trackJ2K,
         parentTask: parentTask ? oid(parentTask) : null,
         department: department || '',
         priority: ['low', 'medium', 'high', 'urgent'].includes(priority) ? priority : 'medium',
@@ -206,6 +211,11 @@ export async function POST(req) {
         stageType: stageType || null,
         stageId: stageId || null,
         attachments: attachments || [],
+        pinned: false,
+        // EVideo language generation: a per-language assignment table instead
+        // of a daily quantity log — see evideoRows shape in the PUT route.
+        isEvideo: !!isEvideo,
+        evideoRows: Array.isArray(evideoRows) ? evideoRows : [],
         // Only meaningful on a child (parentTask set): distinguishes a bug
         // filed against a task from a regular subtask/checklist item.
         kind: kind === 'bug' ? 'bug' : null,

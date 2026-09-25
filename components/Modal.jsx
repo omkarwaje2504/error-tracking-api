@@ -1,6 +1,16 @@
 'use client';
 
-export default function Modal({ open, onClose, title, children, resizable = false }) {
+// Width presets for non-resizable modals — 'md' (default) keeps every
+// existing caller's look unchanged; wider ones are for content that needs
+// real table space (e.g. EvideoModal's per-language assignment grid).
+const SIZE_CLASSES = {
+    md: 'max-w-md',
+    lg: 'max-w-2xl',
+    xl: 'max-w-4xl',
+    full: 'max-w-6xl',
+};
+
+export default function Modal({ open, onClose, title, children, resizable = false, size = 'md' }) {
     if (!open) return null;
     return (
         <div
@@ -10,7 +20,7 @@ export default function Modal({ open, onClose, title, children, resizable = fals
             <div
                 className={`card relative ${resizable
                     ? 'resize overflow-auto min-w-[320px] min-h-[240px] max-w-[95vw] max-h-[90vh]'
-                    : 'w-full max-w-md max-h-[90vh] overflow-y-auto'
+                    : `w-full ${SIZE_CLASSES[size] || SIZE_CLASSES.md} max-h-[90vh] overflow-y-auto`
                 }`}
                 style={resizable ? { width: '32rem', height: '30rem' } : undefined}
                 onClick={(e) => e.stopPropagation()}

@@ -15,7 +15,7 @@ export async function GET(req, { params }) {
         { $sort: { date: -1, createdAt: -1 } },
         { $lookup: { from: 'users', localField: 'user', foreignField: '_id', as: 'user' } },
         { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-        { $project: { date: 1, added: 1, completed: 1, declined: 1, note: 1, createdAt: 1, 'user.name': 1 } },
+        { $project: { date: 1, added: 1, completed: 1, declined: 1, j2k: 1, note: 1, createdAt: 1, 'user.name': 1 } },
     ]).toArray();
 
     const totals = logs.reduce(
@@ -23,8 +23,9 @@ export async function GET(req, { params }) {
             added: acc.added + (l.added || 0),
             completed: acc.completed + (l.completed || 0),
             declined: acc.declined + (l.declined || 0),
+            j2k: acc.j2k + (l.j2k || 0),
         }),
-        { added: 0, completed: 0, declined: 0 }
+        { added: 0, completed: 0, declined: 0, j2k: 0 }
     );
 
     return NextResponse.json({ logs, totals });
@@ -36,7 +37,7 @@ export async function POST(req, { params }) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const db = await connectDB();
     const { id } = await params;
-    const { date, added, completed, declined, note } = await req.json();
+    const { date, added, completed, declined, j2k, note } = await req.json();
 
     const doc = {
         task: oid(id),
@@ -44,6 +45,9 @@ export async function POST(req, { params }) {
         added: Number(added) || 0,
         completed: Number(completed) || 0,
         declined: Number(declined) || 0,
+        // Only meaningful for PVR-style tasks (task.trackJ2K) — J2K file
+        // generation count for the day, alongside the usual add/done/decline.
+        j2k: Number(j2k) || 0,
         note: note || '',
         user: oid(session.id),
         deleted: false,

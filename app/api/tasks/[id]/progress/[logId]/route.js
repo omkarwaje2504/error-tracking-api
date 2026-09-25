@@ -8,12 +8,14 @@ export async function PUT(req, { params }) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const db = await connectDB();
     const { logId } = await params;
-    const { date, added, completed, note } = await req.json();
+    const { date, added, completed, declined, j2k, note } = await req.json();
 
     const set = {};
     if (date !== undefined) set.date = date;
     if (added !== undefined) set.added = Number(added) || 0;
     if (completed !== undefined) set.completed = Number(completed) || 0;
+    if (declined !== undefined) set.declined = Number(declined) || 0;
+    if (j2k !== undefined) set.j2k = Number(j2k) || 0;
     if (note !== undefined) set.note = note;
 
     await db.collection('progress').updateOne({ _id: oid(logId) }, { $set: set });

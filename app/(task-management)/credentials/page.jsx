@@ -12,7 +12,10 @@ import { getSession } from '@/lib/session';
 // How long a revealed password stays on screen before auto-hiding again.
 const AUTO_HIDE_MS = 60_000;
 
-const EMPTY_FORM = { service: '', name: '', username: '', password: '', notes: '' };
+const EMPTY_FORM = {
+    service: '', name: '', username: '', password: '', notes: '',
+    billingStatus: 'active', billingAmount: '', nextPaymentDate: '', cardLast4: '',
+};
 
 // Older entries (or plain typos) might not have `service` set — fall back
 // to the account's own label so nothing vanishes from the list.
@@ -55,7 +58,13 @@ export default function Credentials() {
     function openNew(service) { setEdit(null); setForm({ ...EMPTY_FORM, service: service || '' }); setOpen(true); }
     function openEdit(c) {
         setEdit(c._id);
-        setForm({ service: c.service || '', name: c.name || '', username: c.username || '', password: '', notes: c.notes || '' });
+        setForm({
+            service: c.service || '', name: c.name || '', username: c.username || '', password: '', notes: c.notes || '',
+            billingStatus: c.billingStatus || 'active',
+            billingAmount: c.billingAmount || '',
+            nextPaymentDate: c.nextPaymentDate ? String(c.nextPaymentDate).slice(0, 10) : '',
+            cardLast4: c.cardLast4 || '',
+        });
         setOpen(true);
     }
     function closeModal() { setOpen(false); setEdit(null); setForm(EMPTY_FORM); }
@@ -63,6 +72,7 @@ export default function Credentials() {
     async function save() {
         if (!form.service.trim()) return toast.error('Service is required.');
         if (!edit && !form.password) return toast.error('Password is required.');
+        if (form.cardLast4 && !/^\d{4}$/.test(form.cardLast4)) return toast.error('Card last 4 digits must be exactly 4 digits.');
         setSaving(true);
         try {
             const url = edit ? `/api/credentials/${edit}` : '/api/credentials';
@@ -191,6 +201,7 @@ export default function Credentials() {
                                     const canManage = isOwner || user?.role === 'lead' || user?.role === 'head';
                                     const live = revealed[c._id];
                                     const info = `Added by ${c.createdByName}${c.lastAccessedByName ? ` · last viewed by ${c.lastAccessedByName} on ${new Date(c.lastAccessedAt).toLocaleString()}` : ''}`;
+                                    const suspended = c.billingStatus === 'suspended';
                                     return (
                                         <div key={c._id} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-line px-2.5 py-1.5 text-sm">
                                             <span className="min-w-0 flex-1 truncate">
@@ -198,6 +209,22 @@ export default function Credentials() {
                                                 {c.name && c.username && <span className="text-neutral-500"> · {c.username}</span>}
                                                 {c.notes && <span className="text-neutral-500"> · {c.notes}</span>}
                                             </span>
+                                            {suspended ? (
+                                                <span className="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-[11px] font-medium text-red-500">
+                                                    ⚠ Suspended — payment due
+                                                </span>
+                                            ) : (c.billingAmount || c.nextPaymentDate) && (
+                                                <span className="shrink-0 rounded-full bg-panel2 px-2 py-0.5 text-[11px] text-neutral-500">
+                                                    {c.billingAmount}
+                                                    {c.billingAmount && c.nextPaymentDate && ' · '}
+                                                    {c.nextPaymentDate && `Next ${new Date(c.nextPaymentDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`}
+                                                </span>
+                                            )}
+                                            {c.cardLast4 && (
+                                                <span className="shrink-0 rounded-full bg-panel2 px-2 py-0.5 text-[11px] text-neutral-500">
+                                                    💳 •••• {c.cardLast4}
+                                                </span>
+                                            )}
                                             <span className="shrink-0 cursor-help text-xs text-neutral-400" title={info}>ⓘ</span>
                                             {live ? (
                                                 <>
@@ -248,9 +275,46 @@ export default function Credentials() {
                     <label className="label">{edit ? 'New password (leave blank to keep current)' : 'Password'}</label>
                     <input type="password" className="input" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
                 </div>
-                <div className="mb-5">
+                <div className="mb-3.5">
                     <label className="label">Notes (optional)</label>
                     <textarea className="input" rows={3} placeholder="URL, extra context…" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+                </div>
+
+                <p className="label mb-2">Billing</p>
+                <div className="mb-3.5 flex gap-3">
+                    <div className="flex-1">
+                        <label className="label">Status</label>
+                        <select className="input" value={form.billingStatus} onChange={(e) => setForm({ ...form, billingStatus: e.target.value })}>
+                            <option value="active">Active</option>
+                            <option value="suspended">Suspended — payment due</option>
+                        </select>
+                    </div>
+                    <div className="flex-1">
+                        <label className="label">Next payment date</label>
+                        <input
+                            type="date" className="input"
+                            value={form.nextPaymentDate}
+                            onChange={(e) => setForm({ ...form, nextPaymentDate: e.target.value })}
+                        />
+                    </div>
+                </div>
+                <div className="mb-5 flex gap-3">
+                    <div className="flex-1">
+                        <label className="label">Amount</label>
+                        <input
+                            className="input" placeholder="e.g. ₹1,016.10 (incl. tax)"
+                            value={form.billingAmount}
+                            onChange={(e) => setForm({ ...form, billingAmount: e.target.value })}
+                        />
+                    </div>
+                    <div className="flex-1">
+                        <label className="label">Card last 4 digits</label>
+                        <input
+                            className="input" placeholder="1234" maxLength={4} inputMode="numeric"
+                            value={form.cardLast4}
+                            onChange={(e) => setForm({ ...form, cardLast4: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                        />
+                    </div>
                 </div>
                 <button className="btn-primary w-full" onClick={save} disabled={saving}>
                     {saving ? 'Saving…' : 'Save'}

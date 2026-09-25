@@ -29,24 +29,37 @@
 }
 
 .dark {
-  --color-bg: #0a0a0c;
-  --color-panel: #141417;
-  --color-panel2: #1c1c21;
-  --color-field: #101013;
-  --color-line: #27272e;
+  /* Cool near-black navy instead of a neutral gray-black, plus a
+     cyan/sky accent — inspired by a glassy dark portfolio reference,
+     for a more premium feel than the flat gray dark mode had. */
+  --color-bg: #06080c;
+  --color-panel: #0d1117;
+  --color-panel2: #161b22;
+  --color-field: #0b0e13;
+  --color-line: #232a34;
 
-  --fg: #f5f5f5;
-  --fg-placeholder: #61616b;
+  --fg: #eef2f6;
+  --fg-placeholder: #6b7280;
   --accent-bg: #ffffff;
   --accent-fg: #000000;
-  --scrollbar: #333;
+  --scrollbar: #2a3038;
 
-  --accent: #818cf8;
-  --accent-2: #a78bfa;
-  --accent-soft: rgba(129, 140, 248, 0.16);
-  --accent-fg-on: #0a0a0c;
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 24px -14px rgba(0, 0, 0, 0.5);
-  --shadow-pop: 0 16px 40px -10px rgba(0, 0, 0, 0.6);
+  --accent: #38bdf8;
+  --accent-2: #6366f1;
+  --accent-soft: rgba(56, 189, 248, 0.16);
+  --accent-fg-on: #041018;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 24px -14px rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 16px 40px -10px rgba(0, 0, 0, 0.7);
+}
+
+/* Ambient glow behind the whole app, echoing the soft cyan/indigo light on
+   the glassy reference image — fixed so it reads as one light source
+   behind the page rather than scrolling with the content. Dark mode only;
+   the light theme stays flat and unaffected. */
+.dark body {
+  background-image:
+    radial-gradient(1100px circle at 10% -10%, rgba(56, 189, 248, 0.20), transparent 65%),
+    radial-gradient(1200px circle at 105% 10%, rgba(99, 102, 241, 0.18), transparent 65%);
 }
 
 body {
@@ -54,6 +67,8 @@ body {
   color: var(--fg);
   -webkit-font-smoothing: antialiased;
   font-family: 'Inter', -apple-system, system-ui, sans-serif;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
   transition: background-color 0.15s, color 0.15s;
 }
 
@@ -117,11 +132,18 @@ a {
     padding: 0.75rem 1.25rem;
     font-size: 0.875rem;
     box-shadow: 0 8px 20px -8px var(--accent-soft);
-    transition: opacity 0.15s, transform 0.1s;
+    transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s;
   }
 
   .btn-primary:hover {
     opacity: 0.9;
+  }
+
+  /* A touch more glow on hover in dark mode, echoing the glassy/lit CTA
+     look from the reference — the light theme's soft shadow is enough on
+     its own and doesn't need this. */
+  .dark .btn-primary:hover {
+    box-shadow: 0 8px 28px -6px var(--accent-soft);
   }
 
   .btn-primary:active {
@@ -152,6 +174,13 @@ a {
     border-radius: 1rem;
     padding: 1.25rem;
     box-shadow: var(--shadow-card);
+  }
+
+  /* Faint inner top edge, like light catching the rim of glass — a cheap
+     way to get some of that glassy-panel feel from the reference without
+     touching every card's markup. */
+  .dark .card {
+    box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   }
 
   .field {

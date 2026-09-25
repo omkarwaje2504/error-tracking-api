@@ -5,8 +5,8 @@ import { toast } from '@/lib/toast';
 import { confirmDialog } from '@/lib/confirm';
 
 export default function ProgressModal({ task, open, onClose, onChange }) {
-    const [data, setData] = useState({ logs: [], totals: { added: 0, completed: 0, declined: 0 } });
-    const [form, setForm] = useState({ date: today(), added: '', completed: '', declined: '', note: '' });
+    const [data, setData] = useState({ logs: [], totals: { added: 0, completed: 0, declined: 0, j2k: 0 } });
+    const [form, setForm] = useState({ date: today(), added: '', completed: '', declined: '', j2k: '', note: '' });
 
     useEffect(() => { if (open && task) load(); }, [open, task]);
 
@@ -18,15 +18,15 @@ export default function ProgressModal({ task, open, onClose, onChange }) {
     }
 
     async function add() {
-        if (!form.added && !form.completed && !form.declined) {
-            return toast.error('Enter an added, completed or declined quantity.');
+        if (!form.added && !form.completed && !form.declined && !form.j2k) {
+            return toast.error('Enter at least one quantity.');
         }
         const res = await fetch(`/api/tasks/${task._id}/progress`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(form),
         });
         if (!res.ok) return toast.error('Failed to add entry.');
-        setForm({ date: today(), added: '', completed: '', declined: '', note: '' });
+        setForm({ date: today(), added: '', completed: '', declined: '', j2k: '', note: '' });
         toast.success('Entry added.');
         await load();
         onChange?.();
@@ -42,10 +42,11 @@ export default function ProgressModal({ task, open, onClose, onChange }) {
     }
 
     if (!task) return null;
-    const { added, completed, declined } = data.totals;
+    const { added, completed, declined, j2k } = data.totals;
     const pending = Math.max(0, added - completed - declined);
     const pct = task.target ? Math.min(100, Math.round((completed / task.target) * 100)) : null;
     const unit = task.unit || 'items';
+    const trackJ2K = !!task.trackJ2K;
 
     return (
         <Modal open={open} onClose={onClose} title={`Progress · ${task.title}`}>
@@ -53,14 +54,16 @@ export default function ProgressModal({ task, open, onClose, onChange }) {
                 Log each batch as it moves — <span className="text-neutral-700 dark:text-neutral-300">added</span> when it goes in,{' '}
                 <span className="text-green-500">completed</span> when it's done, and{' '}
                 <span className="text-red-500">declined</span> for anything rejected and sent back for rework.
+                {trackJ2K && <> Also logs the day's <span className="text-blue-500">J2K file generation</span> count.</>}
             </p>
 
             {/* Summary */}
-            <div className="mb-4 grid grid-cols-4 gap-2 text-center">
+            <div className={`mb-4 grid gap-2 text-center ${trackJ2K ? 'grid-cols-5' : 'grid-cols-4'}`}>
                 <Stat label="Added" value={added} />
                 <Stat label="Completed" value={completed} accent="text-green-500" />
                 <Stat label="Declined" value={declined} accent={declined > 0 ? 'text-red-500' : ''} />
                 <Stat label="In batch" value={pending} accent={pending > 0 ? 'text-amber-500' : ''} />
+                {trackJ2K && <Stat label="J2K files" value={j2k} accent="text-blue-500" />}
             </div>
 
             {task.target != null && (
@@ -77,7 +80,7 @@ export default function ProgressModal({ task, open, onClose, onChange }) {
 
             {/* Add entry */}
             <div className="mb-4 rounded-xl border border-line p-3">
-                <div className="mb-2.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className={`mb-2.5 grid grid-cols-2 gap-2 ${trackJ2K ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}>
                     <div>
                         <label className="label">Date</label>
                         <input className="input" type="date" value={form.date}
@@ -98,6 +101,13 @@ export default function ProgressModal({ task, open, onClose, onChange }) {
                         <input className="input" type="number" min="0" value={form.declined}
                             onChange={(e) => setForm({ ...form, declined: e.target.value })} />
                     </div>
+                    {trackJ2K && (
+                        <div>
+                            <label className="label">J2K files</label>
+                            <input className="input" type="number" min="0" value={form.j2k}
+                                onChange={(e) => setForm({ ...form, j2k: e.target.value })} />
+                        </div>
+                    )}
                 </div>
                 <input className="input mb-2.5" placeholder="Note (optional)" value={form.note}
                     onChange={(e) => setForm({ ...form, note: e.target.value })} />
@@ -113,13 +123,14 @@ export default function ProgressModal({ task, open, onClose, onChange }) {
                             <th className="py-2 font-medium">+Add</th>
                             <th className="py-2 font-medium">Done</th>
                             <th className="py-2 font-medium">Declined</th>
+                            {trackJ2K && <th className="py-2 font-medium">J2K</th>}
                             <th className="py-2 font-medium">By</th>
                             <th className="py-2"></th>
                         </tr>
                     </thead>
                     <tbody>
                         {data.logs.length === 0 && (
-                            <tr><td colSpan={6} className="py-4 text-center text-neutral-500">No entries yet.</td></tr>
+                            <tr><td colSpan={trackJ2K ? 7 : 6} className="py-4 text-center text-neutral-500">No entries yet.</td></tr>
                         )}
                         {data.logs.map((l) => (
                             <tr key={l._id} className="border-b border-line/60 last:border-0">
@@ -127,6 +138,7 @@ export default function ProgressModal({ task, open, onClose, onChange }) {
                                 <td className="py-2 text-neutral-600 dark:text-neutral-400">{l.added || '—'}</td>
                                 <td className="py-2 text-green-500">{l.completed || '—'}</td>
                                 <td className="py-2 text-red-500">{l.declined || '—'}</td>
+                                {trackJ2K && <td className="py-2 text-blue-500">{l.j2k || '—'}</td>}
                                 <td className="py-2 text-neutral-500">{l.user?.name || '—'}</td>
                                 <td className="py-2 text-right">
                                     <button className="text-xs text-neutral-500 hover:text-red-400"
