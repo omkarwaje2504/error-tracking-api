@@ -8,6 +8,7 @@ import { TableSkeleton } from "@/components/Skeleton";
 import { toast } from "@/lib/toast";
 import { confirmDialog } from "@/lib/confirm";
 import { getSession } from "@/lib/session";
+import SortableTh, { nextSort, compareSortValues } from "@/components/SortableTh";
 
 const ROLES = ["team-member", "lead", "head"];
 const TEAMS = ["graphic", "video", "frontend", "backend", "app", "all"];
@@ -35,6 +36,7 @@ export default function Users() {
   const [q, setQ] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
+  const [sort, setSort] = useState({ key: null, dir: null });
   const [edit, setEdit] = useState(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -145,19 +147,20 @@ export default function Users() {
     load();
   }
 
-  const rows = useMemo(
-    () =>
-      users
-        .filter(
-          (u) =>
-            !q ||
-            u.name?.toLowerCase().includes(q.toLowerCase()) ||
-            u.email?.toLowerCase().includes(q.toLowerCase())
-        )
-        .filter((u) => !roleFilter || u.role === roleFilter)
-        .filter((u) => !teamFilter || u.team === teamFilter),
-    [users, q, roleFilter, teamFilter]
-  );
+  const rows = useMemo(() => {
+    const filtered = users
+      .filter(
+        (u) =>
+          !q ||
+          u.name?.toLowerCase().includes(q.toLowerCase()) ||
+          u.email?.toLowerCase().includes(q.toLowerCase())
+      )
+      .filter((u) => !roleFilter || u.role === roleFilter)
+      .filter((u) => !teamFilter || u.team === teamFilter);
+    if (!sort.key) return filtered;
+    const val = (u) => (u[sort.key] || "").toLowerCase();
+    return [...filtered].sort((a, b) => compareSortValues(val(a), val(b), sort.dir));
+  }, [users, q, roleFilter, teamFilter, sort]);
 
   const hasFilters = q || roleFilter || teamFilter;
 
@@ -307,11 +310,11 @@ export default function Users() {
           <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-neutral-500">
-                <th className="px-4 py-3 font-medium">Name</th>
-                <th className="px-4 py-3 font-medium">Email</th>
-                <th className="px-4 py-3 font-medium">Mobile</th>
-                <th className="px-4 py-3 font-medium">Role</th>
-                <th className="px-4 py-3 font-medium">Team</th>
+                <SortableTh sortKey="name" label="Name" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+                <SortableTh sortKey="email" label="Email" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+                <SortableTh sortKey="mobile" label="Mobile" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+                <SortableTh sortKey="role" label="Role" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+                <SortableTh sortKey="team" label="Team" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
                 {isHead && (
                   <th className="px-4 py-3 text-right font-medium">Actions</th>
                 )}

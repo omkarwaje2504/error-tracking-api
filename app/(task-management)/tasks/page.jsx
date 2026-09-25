@@ -10,6 +10,7 @@ import BugModal from '@/components/BugModal';
 import EvideoModal from '@/components/EvideoModal';
 import EmptyState from '@/components/EmptyState';
 import FileButton from '@/components/FileButton';
+import SortableTh, { nextSort, compareSortValues } from '@/components/SortableTh';
 import { TableSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
 import { confirmDialog, promptDialog } from '@/lib/confirm';
@@ -75,6 +76,7 @@ function TasksInner() {
     const [priority, setPriority] = useState('');
     const [department, setDepartment] = useState('');
     const [productTypeFilter, setProductTypeFilter] = useState('');
+    const [sort, setSort] = useState({ key: null, dir: null });
 
     useEffect(() => { init(); }, []);
 
@@ -318,6 +320,19 @@ function TasksInner() {
 
     // Status/priority/assignee are already applied server-side — this just orders the current page.
     const rows = useMemo(() => {
+        if (sort.key) {
+            const val = (t) => {
+                switch (sort.key) {
+                    case 'title': return t.title?.toLowerCase() || '';
+                    case 'project': return t.project?.name?.toLowerCase() || '';
+                    case 'due': return t.dueDate ? new Date(t.dueDate).getTime() : null;
+                    default: return '';
+                }
+            };
+            return [...tasks].sort((a, b) => compareSortValues(val(a), val(b), sort.dir));
+        }
+        // Default order when nothing's explicitly sorted (or after reset):
+        // pinned first, then overdue, then priority, then newest.
         return [...tasks].sort((a, b) => {
             if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
             const aOverdue = isOverdue(a), bOverdue = isOverdue(b);
@@ -326,7 +341,7 @@ function TasksInner() {
             if (ap !== bp) return ap - bp;
             return new Date(b.createdAt) - new Date(a.createdAt);
         });
-    }, [tasks]);
+    }, [tasks, sort]);
 
     return (
         <Shell user={user} onAdd={openNew}>
@@ -443,10 +458,10 @@ function TasksInner() {
                         <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-neutral-500">
                             <th className="w-8 px-2 py-3 font-medium" aria-hidden />
                             <th className="px-4 py-3 font-medium">Done</th>
-                            <th className="px-4 py-3 font-medium">Task</th>
-                            <th className="px-4 py-3 font-medium">Project</th>
+                            <SortableTh sortKey="title" label="Task" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+                            <SortableTh sortKey="project" label="Project" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
                             <th className="px-4 py-3 font-medium">Assignees</th>
-                            <th className="px-4 py-3 font-medium">Due</th>
+                            <SortableTh sortKey="due" label="Due" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
                             <th className="px-4 py-3 text-right font-medium">Actions</th>
                         </tr>
                     </thead>

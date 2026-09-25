@@ -5,6 +5,7 @@ import Shell from '@/components/Shell';
 import ProgressModal from '@/components/ProgressModal';
 import DailyReportModal from '@/components/DailyReportModal';
 import EmptyState from '@/components/EmptyState';
+import SortableTh, { nextSort, compareSortValues } from '@/components/SortableTh';
 import { TableSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
 import { promptDialog } from '@/lib/confirm';
@@ -21,7 +22,7 @@ export default function Dashboard() {
     // filters
     const [status, setStatus] = useState('active');
     const [q, setQ] = useState('');
-    const [sort, setSort] = useState({ key: 'createdAt', dir: 'desc' });
+    const [sort, setSort] = useState({ key: null, dir: null });
 
     const [progressTask, setProgressTask] = useState(null);
     const [reportOpen, setReportOpen] = useState(false);
@@ -89,33 +90,25 @@ export default function Dashboard() {
             if (q && !t.title.toLowerCase().includes(q.toLowerCase())) return false;
             return true;
         });
-        const val = (t) => {
-            switch (sort.key) {
-                case 'title': return t.title?.toLowerCase() || '';
-                case 'project': return t.project?.name?.toLowerCase() || '';
-                case 'status': return t.status || '';
-                default: return t.createdAt || '';
-            }
-        };
-        r = [...r].sort((a, b) => {
-            const av = val(a), bv = val(b);
-            if (av < bv) return sort.dir === 'asc' ? -1 : 1;
-            if (av > bv) return sort.dir === 'asc' ? 1 : -1;
-            return 0;
-        });
+        if (sort.key) {
+            const val = (t) => {
+                switch (sort.key) {
+                    case 'title': return t.title?.toLowerCase() || '';
+                    case 'project': return t.project?.name?.toLowerCase() || '';
+                    case 'status': return t.status || '';
+                    default: return '';
+                }
+            };
+            r = [...r].sort((a, b) => compareSortValues(val(a), val(b), sort.dir));
+        } else {
+            // Default order when nothing's explicitly sorted (or after reset).
+            r = [...r].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        }
         return r;
     }, [tasks, status, q, sort]);
 
     function th(key, label) {
-        const active = sort.key === key;
-        return (
-            <th
-                className="cursor-pointer select-none px-4 py-3 font-medium hover:text-neutral-800 dark:hover:text-neutral-300"
-                onClick={() => setSort((s) => ({ key, dir: s.key === key && s.dir === 'asc' ? 'desc' : 'asc' }))}
-            >
-                {label}{active ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
-            </th>
-        );
+        return <SortableTh sortKey={key} label={label} sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />;
     }
 
     const pending = tasks.filter((t) => t.status === 'pending').length;

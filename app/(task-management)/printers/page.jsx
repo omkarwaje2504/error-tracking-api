@@ -11,6 +11,7 @@ import { confirmDialog } from "@/lib/confirm";
 import { colorFor } from "@/lib/colors";
 import { getSession } from "@/lib/session";
 import { getReference } from "@/lib/referenceCache";
+import SortableTh, { nextSort, compareSortValues } from "@/components/SortableTh";
 
 export default function Printers() {
   const router = useRouter();
@@ -18,6 +19,7 @@ export default function Printers() {
   const [printers, setPrinters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  const [sort, setSort] = useState({ key: null, dir: null });
   const [edit, setEdit] = useState(null);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -148,16 +150,17 @@ export default function Printers() {
     load();
   }
 
-  const rows = useMemo(
-    () =>
-      printers.filter(
-        (p) =>
-          !q ||
-          p.name?.toLowerCase().includes(q.toLowerCase()) ||
-          p.email_id?.toLowerCase().includes(q.toLowerCase()),
-      ),
-    [printers, q],
-  );
+  const rows = useMemo(() => {
+    const filtered = printers.filter(
+      (p) =>
+        !q ||
+        p.name?.toLowerCase().includes(q.toLowerCase()) ||
+        p.email_id?.toLowerCase().includes(q.toLowerCase()),
+    );
+    if (!sort.key) return filtered;
+    const val = (p) => (p[sort.key] || "").toLowerCase();
+    return [...filtered].sort((a, b) => compareSortValues(val(a), val(b), sort.dir));
+  }, [printers, q, sort]);
 
   return (
     <Shell user={user} onAdd={openNew}>
@@ -203,19 +206,19 @@ export default function Printers() {
           <table className="w-full min-w-[950px] text-sm">
             <thead>
               <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-neutral-500">
-                <th className="px-4 py-3 font-medium">Printer Name</th>
+                <SortableTh sortKey="name" label="Printer Name" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
 
-                <th className="px-4 py-3 font-medium">Email ID</th>
+                <SortableTh sortKey="email_id" label="Email ID" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
 
-                <th className="px-4 py-3 font-medium">Printer Type</th>
+                <SortableTh sortKey="printerType" label="Printer Type" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
 
-                <th className="px-4 py-3 font-medium">Page Color</th>
+                <SortableTh sortKey="pageColor" label="Page Color" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
 
-                <th className="px-4 py-3 font-medium">File Type</th>
+                <SortableTh sortKey="fileType" label="File Type" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
 
-                <th className="px-4 py-3 font-medium">File Size</th>
+                <SortableTh sortKey="fileSize" label="File Size" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
 
-                <th className="px-4 py-3 font-medium">Page Type</th>
+                <SortableTh sortKey="pageType" label="Page Type" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
 
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>

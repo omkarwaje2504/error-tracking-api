@@ -2,6 +2,7 @@ import { connectDB } from '@/lib/mongodb';
 import { oid } from '@/lib/objectId';
 import { getSession } from '@/lib/auth';
 import { logActivity } from '@/lib/activity';
+import { PROJECT_STAGES } from '@/lib/projectStages';
 import { NextResponse } from 'next/server';
 
 const USER_FIELDS = { name: 1, team: 1, role: 1 };
@@ -49,6 +50,7 @@ export async function PUT(req, { params }) {
     if (body.link !== undefined) set.link = body.link;
     if (body.status !== undefined) set.status = body.status;
     if (body.pinned !== undefined) set.pinned = !!body.pinned;
+    if (body.currentStage !== undefined) set.currentStage = PROJECT_STAGES.includes(body.currentStage) ? body.currentStage : '';
     if (body.attachments !== undefined) set.attachments = body.attachments;
     if (body.sections !== undefined) set.sections = body.sections;
     if (body.kickoff !== undefined) set.kickoff = body.kickoff;

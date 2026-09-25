@@ -10,6 +10,8 @@ import { getSession } from '@/lib/session';
 import { getReference } from '@/lib/referenceCache';
 import { getTeamSetting, setTeamSetting } from '@/lib/teamSettings';
 import { colorFor } from '@/lib/colors';
+import { PROJECT_STAGES, projectStageLabel, projectStageClassName } from '@/lib/projectStages';
+import SortableTh, { nextSort, compareSortValues } from '@/components/SortableTh';
 
 // Empty string stands for "no product type set" — kept in the hidden-types
 // list the same way the API's `excludeTypes` param expects it.
@@ -44,6 +46,7 @@ function ProjectsInner() {
     const [companyFilter, setCompanyFilter] = useState('');
     const [brandFilter, setBrandFilter] = useState(brandFilterParam || '');
     const [productTypeFilter, setProductTypeFilter] = useState('');
+    const [sort, setSort] = useState({ key: null, dir: null });
 
     useEffect(() => { init(); }, []);
 
@@ -109,6 +112,19 @@ function ProjectsInner() {
         });
         if (!res.ok) {
             toast.error('Failed to update pin.');
+            load();
+        }
+    }
+
+    async function updateStage(e, p, currentStage) {
+        e.stopPropagation(); // don't navigate into the project row
+        setProjects((list) => list.map((x) => (x._id === p._id ? { ...x, currentStage } : x)));
+        const res = await fetch(`/api/projects/${p._id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currentStage }),
+        });
+        if (!res.ok) {
+            toast.error('Failed to update stage.');
             load();
         }
     }
@@ -184,10 +200,26 @@ function ProjectsInner() {
         [brands, companyFilter]
     );
 
-    // Status/company/brand are already applied server-side — only the free-text search happens here.
-    const rows = useMemo(() => projects.filter((p) => (
-        !q || p.name?.toLowerCase().includes(q.toLowerCase())
-    )), [projects, q]);
+    // Status/company/brand are already applied server-side — only the free-text
+    // search happens here, plus sort when a column's explicitly picked (the
+    // server already sorts pinned-first/newest by default; reset returns to that).
+    const rows = useMemo(() => {
+        const filtered = projects.filter((p) => !q || p.name?.toLowerCase().includes(q.toLowerCase()));
+        if (!sort.key) return filtered;
+        const val = (p) => {
+            switch (sort.key) {
+                case 'name': return p.name?.toLowerCase() || '';
+                case 'type': return p.projectType?.toLowerCase() || '';
+                case 'division': return p.brand?.name?.toLowerCase() || '';
+                case 'company': return (p.company?.name || p.brand?.company?.name || '').toLowerCase();
+                case 'stage': return p.currentStage || '';
+                case 'status': return p.status || '';
+                case 'deadline': return p.deadline ? new Date(p.deadline).getTime() : null;
+                default: return '';
+            }
+        };
+        return [...filtered].sort((a, b) => compareSortValues(val(a), val(b), sort.dir));
+    }, [projects, q, sort]);
 
     const typeOptions = useMemo(
         () => [{ _id: '__no-type__', name: 'No type', key: NO_TYPE }, ...productTypes.map((t) => ({ ...t, key: t.name }))],
@@ -277,7 +309,7 @@ function ProjectsInner() {
 
             <div className="card overflow-x-auto !p-0">
                 {loading ? (
-                    <TableSkeleton rows={5} cols={6} />
+                    <TableSkeleton rows={5} cols={7} />
                 ) : rows.length === 0 ? (
                     <EmptyState
                         icon="📁"
@@ -291,12 +323,13 @@ function ProjectsInner() {
                         <thead>
                             <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-neutral-500">
                                 <th className="w-8 px-2 py-3 font-medium" aria-hidden />
-                                <th className="px-4 py-3 font-medium">Name</th>
-                                <th className="px-4 py-3 font-medium">Type</th>
-                                <th className="px-4 py-3 font-medium">Division</th>
-                                <th className="px-4 py-3 font-medium">Company</th>
-                                <th className="px-4 py-3 font-medium">Status</th>
-                                <th className="px-4 py-3 font-medium">Deadline</th>
+                                <SortableTh sortKey="name" label="Name" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+                                <SortableTh sortKey="type" label="Type" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+                                <SortableTh sortKey="division" label="Division" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+                                <SortableTh sortKey="company" label="Company" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+                                <SortableTh sortKey="stage" label="Stage" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+                                <SortableTh sortKey="status" label="Status" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+                                <SortableTh sortKey="deadline" label="Deadline" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
                             </tr>
                         </thead>
                         <tbody>
@@ -328,6 +361,16 @@ function ProjectsInner() {
                                     </td>
                                     <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{p.brand?.name || '—'}</td>
                                     <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{p.company?.name || p.brand?.company?.name || '—'}</td>
+                                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                        <select
+                                            className={`rounded-full border-0 px-2.5 py-1 text-xs font-medium ${projectStageClassName(p.currentStage)}`}
+                                            value={p.currentStage || ''}
+                                            onChange={(e) => updateStage(e, p, e.target.value)}
+                                        >
+                                            <option value="">Not set</option>
+                                            {PROJECT_STAGES.map((s) => <option key={s} value={s}>{projectStageLabel(s)}</option>)}
+                                        </select>
+                                    </td>
                                     <td className="px-4 py-3">
                                         <span className={`rounded-full px-2.5 py-1 text-xs capitalize ${statusPill(p.status)}`}>
                                             {p.status || 'active'}

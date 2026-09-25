@@ -2,6 +2,7 @@ import { connectDB } from '@/lib/mongodb';
 import { oid } from '@/lib/objectId';
 import { getSession } from '@/lib/auth';
 import { logActivity } from '@/lib/activity';
+import { PROJECT_STAGES } from '@/lib/projectStages';
 import { NextResponse } from 'next/server';
 
 export async function GET(req) {
@@ -62,7 +63,7 @@ export async function GET(req) {
         {
             $project: {
                 name: 1, description: 1, createdAt: 1, updatedAt: 1, deadline: 1, status: 1, link: 1,
-                client: 1, projectType: 1, pinned: 1,
+                client: 1, projectType: 1, pinned: 1, currentStage: 1,
                 salesPerson: 1, servicePerson: 1,
                 'brand._id': 1, 'brand.name': 1, 'brand.company.name': 1,
                 'company._id': 1, 'company.name': 1,
@@ -83,7 +84,7 @@ export async function POST(req) {
     const db = await connectDB();
     const {
         name, description, brand, company, client, salesPerson, servicePerson,
-        projectType, deadline, link, status,
+        projectType, deadline, link, status, currentStage,
     } = await req.json();
     if (!name || !name.trim()) {
         return NextResponse.json({ error: 'Name is required' }, { status: 400 });
@@ -100,6 +101,10 @@ export async function POST(req) {
         deadline: deadline || null,
         link: link || '',
         status: status || 'active',
+        // Where the project currently sits in its journey — a quick-glance/
+        // quick-edit field on the list, separate from the detail page's
+        // multi-section journey (kickoff/design/development/production/…).
+        currentStage: PROJECT_STAGES.includes(currentStage) ? currentStage : '',
         pinned: false,
         attachments: [],
         sections: [],
