@@ -11,11 +11,27 @@ import { getReference } from '@/lib/referenceCache';
 import { getTeamSetting, setTeamSetting } from '@/lib/teamSettings';
 import { colorFor } from '@/lib/colors';
 import { PROJECT_STAGES, projectStageLabel, projectStageClassName } from '@/lib/projectStages';
-import SortableTh, { nextSort, compareSortValues } from '@/components/SortableTh';
+import SortableTh, { nextMultiSort, compareMulti } from '@/components/SortableTh';
 
 // Empty string stands for "no product type set" — kept in the hidden-types
 // list the same way the API's `excludeTypes` param expects it.
 const NO_TYPE = '';
+
+const STATUS_OPTIONS = ['active', 'on-hold', 'completed', 'cancelled'];
+
+// Column key -> label, in header order; drives the "then by…" picker.
+const SORT_LABELS = {
+    name: 'Name', type: 'Type', division: 'Division', company: 'Company',
+    stage: 'Stage', status: 'Status', deadline: 'Deadline',
+};
+
+// Search/filters/sort survive opening a project and coming back (per browser
+// tab). Restored in init() before the first fetch so the list loads once.
+const VIEW_KEY = 'projects:view';
+
+function readView() {
+    try { return JSON.parse(sessionStorage.getItem(VIEW_KEY)) || {}; } catch { return {}; }
+}
 
 function ProjectsInner() {
     const router = useRouter();
@@ -46,9 +62,17 @@ function ProjectsInner() {
     const [companyFilter, setCompanyFilter] = useState('');
     const [brandFilter, setBrandFilter] = useState(brandFilterParam || '');
     const [productTypeFilter, setProductTypeFilter] = useState('');
-    const [sort, setSort] = useState({ key: null, dir: null });
+    const [stageFilter, setStageFilter] = useState('');
+    const [sort, setSort] = useState([]);
 
     useEffect(() => { init(); }, []);
+
+    useEffect(() => {
+        if (!settingsLoaded) return; // don't clobber the saved view with defaults
+        try {
+            sessionStorage.setItem(VIEW_KEY, JSON.stringify({ q, status, companyFilter, brandFilter, stageFilter, sort }));
+        } catch { /* storage unavailable — view just won't persist */ }
+    }, [settingsLoaded, q, status, companyFilter, brandFilter, stageFilter, sort]);
 
     // Don't fetch the project list until the shared type-filter settings
     // have loaded once — otherwise the first fetch runs with hiddenTypes/
@@ -57,13 +81,14 @@ function ProjectsInner() {
     useEffect(() => {
         if (!settingsLoaded) return;
         load();
-    }, [settingsLoaded, status, companyFilter, brandFilter, productTypeFilter, hiddenTypes]);
+    }, [settingsLoaded, status, companyFilter, brandFilter, stageFilter, productTypeFilter, hiddenTypes]);
 
     function buildQuery(page) {
         const p = new URLSearchParams();
         if (status) p.set('status', status);
         if (companyFilter) p.set('company', companyFilter);
         if (brandFilter) p.set('brand', brandFilter);
+        if (stageFilter) p.set('stage', stageFilter);
         if (productTypeFilter) p.set('productType', productTypeFilter);
         else if (hiddenTypes.length) p.set('excludeTypes', hiddenTypes.join(','));
         p.set('page', String(page));
@@ -118,7 +143,12 @@ function ProjectsInner() {
 
     async function updateStage(e, p, currentStage) {
         e.stopPropagation(); // don't navigate into the project row
-        setProjects((list) => list.map((x) => (x._id === p._id ? { ...x, currentStage } : x)));
+        // Drop the row if it no longer matches the stage filter.
+        const matches = !stageFilter || stageFilter === (currentStage || 'none');
+        setProjects((list) => (matches
+            ? list.map((x) => (x._id === p._id ? { ...x, currentStage } : x))
+            : list.filter((x) => x._id !== p._id)));
+        if (!matches) setTotal((t) => t - 1);
         const res = await fetch(`/api/projects/${p._id}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ currentStage }),
@@ -127,6 +157,25 @@ function ProjectsInner() {
             toast.error('Failed to update stage.');
             load();
         }
+    }
+
+    async function updateStatus(p, status) {
+        // Drop the row if it no longer matches the status filter (e.g. closing
+        // a project while viewing Active) — mirrors the server-side match.
+        const matches = status === 'completed' ? statusFilterAllowsCompleted : statusFilterAllowsOpen;
+        setProjects((list) => (matches
+            ? list.map((x) => (x._id === p._id ? { ...x, status } : x))
+            : list.filter((x) => x._id !== p._id)));
+        if (!matches) setTotal((t) => t - 1);
+        const res = await fetch(`/api/projects/${p._id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status }),
+        });
+        if (!res.ok) {
+            toast.error('Failed to update status.');
+            return load();
+        }
+        toast.success(`"${p.name}" marked ${status}.`);
     }
 
     async function init() {
@@ -139,6 +188,16 @@ function ProjectsInner() {
         ]);
         setHiddenTypes(hidden || []);
         setProductTypeFilter(shownType || '');
+        const view = readView();
+        if (typeof view.q === 'string') setQ(view.q);
+        if (view.status) setStatus(view.status);
+        if (view.stageFilter) setStageFilter(view.stageFilter);
+        if (Array.isArray(view.sort)) setSort(view.sort);
+        // A ?brand= link (e.g. from a brand page) wins over the saved company/brand.
+        if (!brandFilterParam) {
+            if (view.companyFilter) setCompanyFilter(view.companyFilter);
+            if (view.brandFilter) setBrandFilter(view.brandFilter);
+        }
         setSettingsLoaded(true);
     }
 
@@ -188,6 +247,9 @@ function ProjectsInner() {
         }
     }
 
+    const statusFilterAllowsCompleted = status !== 'active';
+    const statusFilterAllowsOpen = status !== 'completed';
+
     const statusPill = (s) => ({
         active: 'bg-green-500/15 text-green-500',
         'on-hold': 'bg-amber-500/15 text-amber-500',
@@ -205,9 +267,9 @@ function ProjectsInner() {
     // server already sorts pinned-first/newest by default; reset returns to that).
     const rows = useMemo(() => {
         const filtered = projects.filter((p) => !q || p.name?.toLowerCase().includes(q.toLowerCase()));
-        if (!sort.key) return filtered;
-        const val = (p) => {
-            switch (sort.key) {
+        if (!sort.length) return filtered;
+        const val = (p, key) => {
+            switch (key) {
                 case 'name': return p.name?.toLowerCase() || '';
                 case 'type': return p.projectType?.toLowerCase() || '';
                 case 'division': return p.brand?.name?.toLowerCase() || '';
@@ -218,15 +280,19 @@ function ProjectsInner() {
                 default: return '';
             }
         };
-        return [...filtered].sort((a, b) => compareSortValues(val(a), val(b), sort.dir));
+        return [...filtered].sort((a, b) => compareMulti(a, b, sort, val));
     }, [projects, q, sort]);
+
+    const onSort = (k, additive) => setSort((s) => nextMultiSort(s, k, additive));
+    const toggleSortDir = (k) => setSort((s) => s.map((x) => (x.key === k ? { ...x, dir: x.dir === 'asc' ? 'desc' : 'asc' } : x)));
+    const removeSort = (k) => setSort((s) => s.filter((x) => x.key !== k));
 
     const typeOptions = useMemo(
         () => [{ _id: '__no-type__', name: 'No type', key: NO_TYPE }, ...productTypes.map((t) => ({ ...t, key: t.name }))],
         [productTypes]
     );
 
-    const hasFilters = status !== 'active' || companyFilter || brandFilter || productTypeFilter || q || hiddenTypes.length > 0;
+    const hasFilters = status !== 'active' || companyFilter || brandFilter || stageFilter || productTypeFilter || q || hiddenTypes.length > 0;
     // Only leads and heads get controls for the type filter/hide-list —
     // team-members still see the resulting (lead-set) filtered list, just
     // without a UI to change it. See app/api/settings/route.js.
@@ -263,6 +329,11 @@ function ProjectsInner() {
                     <option value="">All brands</option>
                     {filteredBrands.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
                 </select>
+                <select className="input w-auto" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
+                    <option value="">All stages</option>
+                    {PROJECT_STAGES.map((s) => <option key={s} value={s}>{projectStageLabel(s)}</option>)}
+                    <option value="none">Not set</option>
+                </select>
                 {canEditTypes && (
                     <select className="input w-auto" value={productTypeFilter} onChange={(e) => selectProductType(e.target.value)}>
                         <option value="">All product types</option>
@@ -273,7 +344,7 @@ function ProjectsInner() {
                     <button
                         className="btn-ghost"
                         onClick={() => {
-                            setStatus('active'); setCompanyFilter(''); setBrandFilter(''); setQ('');
+                            setStatus('active'); setCompanyFilter(''); setBrandFilter(''); setStageFilter(''); setQ('');
                             if (canEditTypes) clearTypeFilters();
                         }}
                     >
@@ -307,6 +378,50 @@ function ProjectsInner() {
                 </div>
             )}
 
+            <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs">
+                <span className="mr-1 font-medium uppercase tracking-wider text-neutral-500">Sort</span>
+                {sort.length === 0 ? (
+                    <span className="text-neutral-500">Default · click a column header; Shift+click to add another level</span>
+                ) : (
+                    <>
+                        {sort.map((s, i) => (
+                            <span key={s.key} className="inline-flex items-center gap-1">
+                                {i > 0 && <span className="text-neutral-400">then</span>}
+                                <span className="inline-flex items-center rounded-full border border-line bg-panel2/40">
+                                    <button
+                                        type="button"
+                                        className="px-2.5 py-1"
+                                        title="Toggle ascending / descending"
+                                        onClick={() => toggleSortDir(s.key)}
+                                    >
+                                        {SORT_LABELS[s.key]} {s.dir === 'asc' ? '↑' : '↓'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="pr-2 text-neutral-400 hover:text-red-400"
+                                        title="Remove this sort level"
+                                        onClick={() => removeSort(s.key)}
+                                    >
+                                        ×
+                                    </button>
+                                </span>
+                            </span>
+                        ))}
+                        <select
+                            className="input w-auto !py-1 text-xs"
+                            value=""
+                            onChange={(e) => e.target.value && onSort(e.target.value, true)}
+                        >
+                            <option value="">+ then by…</option>
+                            {Object.entries(SORT_LABELS)
+                                .filter(([k]) => !sort.some((s) => s.key === k))
+                                .map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                        </select>
+                        <button type="button" className="btn-ghost !py-1 text-xs" onClick={() => setSort([])}>Reset</button>
+                    </>
+                )}
+            </div>
+
             <div className="card overflow-x-auto !p-0">
                 {loading ? (
                     <TableSkeleton rows={5} cols={7} />
@@ -323,13 +438,13 @@ function ProjectsInner() {
                         <thead>
                             <tr className="border-b border-line text-left text-xs uppercase tracking-wider text-neutral-500">
                                 <th className="w-8 px-2 py-3 font-medium" aria-hidden />
-                                <SortableTh sortKey="name" label="Name" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
-                                <SortableTh sortKey="type" label="Type" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
-                                <SortableTh sortKey="division" label="Division" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
-                                <SortableTh sortKey="company" label="Company" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
-                                <SortableTh sortKey="stage" label="Stage" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
-                                <SortableTh sortKey="status" label="Status" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
-                                <SortableTh sortKey="deadline" label="Deadline" sort={sort} onSort={(k) => setSort((s) => nextSort(s, k))} />
+                                <SortableTh sortKey="name" label="Name" sort={sort} onSort={onSort} />
+                                <SortableTh sortKey="type" label="Type" sort={sort} onSort={onSort} />
+                                <SortableTh sortKey="division" label="Division" sort={sort} onSort={onSort} />
+                                <SortableTh sortKey="company" label="Company" sort={sort} onSort={onSort} />
+                                <SortableTh sortKey="stage" label="Stage" sort={sort} onSort={onSort} />
+                                <SortableTh sortKey="status" label="Status" sort={sort} onSort={onSort} />
+                                <SortableTh sortKey="deadline" label="Deadline" sort={sort} onSort={onSort} />
                             </tr>
                         </thead>
                         <tbody>
@@ -371,10 +486,15 @@ function ProjectsInner() {
                                             {PROJECT_STAGES.map((s) => <option key={s} value={s}>{projectStageLabel(s)}</option>)}
                                         </select>
                                     </td>
-                                    <td className="px-4 py-3">
-                                        <span className={`rounded-full px-2.5 py-1 text-xs capitalize ${statusPill(p.status)}`}>
-                                            {p.status || 'active'}
-                                        </span>
+                                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                        <select
+                                            className={`rounded-full border-0 px-2.5 py-1 text-xs font-medium capitalize ${statusPill(p.status)}`}
+                                            value={p.status || 'active'}
+                                            onChange={(e) => updateStatus(p, e.target.value)}
+                                            title="Change project status"
+                                        >
+                                            {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                                        </select>
                                     </td>
                                     <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
                                         {p.deadline ? new Date(p.deadline).toLocaleDateString() : '—'}

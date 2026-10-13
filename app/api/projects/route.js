@@ -14,6 +14,8 @@ export async function GET(req) {
     const brandId = params.get('brand');
     const companyId = params.get('company');
     const statusFilter = params.get('status'); // 'active' | 'completed' | 'all'
+    // A PROJECT_STAGES value, or 'none' for projects with no current stage.
+    const stageParam = params.get('stage');
     // Show only this one product type — takes priority over excludeTypes.
     const productTypeParam = params.get('productType');
     // Comma-separated product type names to hide, e.g. "Rx-pad,Poster". An
@@ -26,6 +28,8 @@ export async function GET(req) {
     if (brandId) match.brand = oid(brandId);
     if (statusFilter === 'active') match.status = { $ne: 'completed' };
     else if (statusFilter === 'completed') match.status = 'completed';
+    if (stageParam === 'none') match.currentStage = { $in: ['', null] };
+    else if (stageParam) match.currentStage = stageParam;
     if (productTypeParam) {
         match.projectType = productTypeParam;
     } else if (excludeTypesParam) {
