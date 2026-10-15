@@ -6,11 +6,8 @@ import Modal from '@/components/Modal';
 import EmptyState from '@/components/EmptyState';
 import { CardSkeleton } from '@/components/Skeleton';
 import { toast } from '@/lib/toast';
-import { confirmDialog, promptDialog } from '@/lib/confirm';
+import { confirmDialog } from '@/lib/confirm';
 import { getSession } from '@/lib/session';
-
-// How long a revealed password stays on screen before auto-hiding again.
-const AUTO_HIDE_MS = 60_000;
 
 const EMPTY_FORM = {
     service: '', name: '', username: '', password: '', notes: '',
@@ -33,17 +30,8 @@ export default function Credentials() {
     const [open, setOpen] = useState(false);
     const [form, setForm] = useState(EMPTY_FORM);
     const [saving, setSaving] = useState(false);
-    // { [credId]: { password, timer } } — kept only in memory, never persisted client-side.
-    const [revealed, setRevealed] = useState({});
 
     useEffect(() => { load(); }, []);
-
-    // Clear every pending auto-hide timer on unmount so nothing fires after
-    // the page's gone.
-    useEffect(() => () => {
-        Object.values(revealed).forEach((r) => r.timer && clearTimeout(r.timer));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
 
     async function load() {
         setLoading(true);
@@ -97,32 +85,6 @@ export default function Credentials() {
         if (!res.ok) return toast.error(data.error || 'Failed to delete.');
         toast.success('Credential deleted.');
         load();
-    }
-
-    function hide(id) {
-        setRevealed((r) => {
-            const next = { ...r };
-            if (next[id]?.timer) clearTimeout(next[id].timer);
-            delete next[id];
-            return next;
-        });
-    }
-
-    async function reveal(c) {
-        const label = c.name ? `${c.service} — ${c.name}` : c.service;
-        const pw = await promptDialog(`Enter your login password to reveal "${label}":`, {
-            placeholder: 'Your password', confirmLabel: 'Reveal', required: true, inputType: 'password',
-        });
-        if (!pw) return;
-        const res = await fetch(`/api/credentials/${c._id}/reveal`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: pw }),
-        });
-        const data = await res.json();
-        if (!res.ok) return toast.error(data.error || 'Failed to reveal.');
-        const timer = setTimeout(() => hide(c._id), AUTO_HIDE_MS);
-        setRevealed((r) => ({ ...r, [c._id]: { password: data.password, timer } }));
-        load(); // pick up the updated "last viewed by" stamp
     }
 
     async function copyPassword(pw) {
@@ -199,7 +161,6 @@ export default function Credentials() {
                                 {accounts.map((c) => {
                                     const isOwner = c.createdBy === user?.id;
                                     const canManage = isOwner || user?.role === 'lead' || user?.role === 'head';
-                                    const live = revealed[c._id];
                                     const info = `Added by ${c.createdByName}${c.lastAccessedByName ? ` · last viewed by ${c.lastAccessedByName} on ${new Date(c.lastAccessedAt).toLocaleString()}` : ''}`;
                                     const suspended = c.billingStatus === 'suspended';
                                     return (
@@ -226,14 +187,13 @@ export default function Credentials() {
                                                 </span>
                                             )}
                                             <span className="shrink-0 cursor-help text-xs text-neutral-400" title={info}>ⓘ</span>
-                                            {live ? (
+                                            {c.password != null ? (
                                                 <>
-                                                    <code className="shrink-0 rounded bg-panel2 px-2 py-1 text-xs">{live.password}</code>
-                                                    <button className="btn-ghost shrink-0 !px-2 !py-1 !text-xs" onClick={() => copyPassword(live.password)}>Copy</button>
-                                                    <button className="btn-ghost shrink-0 !px-2 !py-1 !text-xs" onClick={() => hide(c._id)}>🙈</button>
+                                                    <code className="shrink-0 select-all rounded bg-panel2 px-2 py-1 text-xs">{c.password}</code>
+                                                    <button className="btn-ghost shrink-0 !px-2 !py-1 !text-xs" onClick={() => copyPassword(c.password)}>Copy</button>
                                                 </>
                                             ) : (
-                                                <button className="btn-ghost shrink-0 !px-2 !py-1 !text-xs" onClick={() => reveal(c)}>👁️ Reveal</button>
+                                                <span className="shrink-0 text-xs text-red-400" title="CREDENTIALS_SECRET may have changed">Can't decrypt</span>
                                             )}
                                             {canManage && (
                                                 <>

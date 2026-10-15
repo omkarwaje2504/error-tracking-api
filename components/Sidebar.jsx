@@ -18,6 +18,7 @@ import {
   FiKey,
   FiAlertTriangle,
   FiFilm,
+  FiImage,
 } from "react-icons/fi";
 import ThemeToggle from "./ThemeToggle";
 import { clearSession } from "@/lib/session";
@@ -82,6 +83,12 @@ const links = [
     href: "/tasks",
     label: "Tasks",
     icon: FiCheckSquare,
+    section: "Operations",
+  },
+  {
+    href: "/posts",
+    label: "Posts",
+    icon: FiImage,
     section: "Operations",
   },
 

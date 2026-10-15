@@ -17,6 +17,7 @@ export default function CompaniesAndBrands() {
   const [companies, setCompanies] = useState([]);
   const [brands, setBrands] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
 
   const [companyModal, setCompanyModal] = useState(false);
   const [companyEdit, setCompanyEdit] = useState(null);
@@ -134,6 +135,12 @@ export default function CompaniesAndBrands() {
     load();
   }
 
+  // One search box for both: a company whose name matches shows with all its
+  // brands; otherwise it shows only if some of its brands match (and then
+  // just those brands).
+  const needle = q.trim().toLowerCase();
+  const matches = (name) => !needle || (name || "").toLowerCase().includes(needle);
+
   const brandsByCompany = useMemo(() => {
     const map = {};
     for (const b of brands) {
@@ -144,10 +151,17 @@ export default function CompaniesAndBrands() {
     return map;
   }, [brands]);
 
+  // Brands to show per company key under the current search.
+  const visibleBrands = (key, companyName) => {
+    const list = brandsByCompany[key] || [];
+    return matches(companyName) ? list : list.filter((b) => matches(b.name));
+  };
+
   const groupedCompanies = useMemo(() => {
     const groups = {};
 
     [...companies]
+      .filter((c) => matches(c.name) || (brandsByCompany[c._id] || []).some((b) => matches(b.name)))
       .sort((a, b) => a.name.localeCompare(b.name))
       .forEach((company) => {
         const letter = company.name?.trim().charAt(0).toUpperCase() || "#";
@@ -160,12 +174,13 @@ export default function CompaniesAndBrands() {
       });
 
     return groups;
-  }, [companies]);
+  }, [companies, brandsByCompany, needle]);
 
-  const unassignedBrands = brandsByCompany.__unassigned__ || [];
+  const unassignedBrands = (brandsByCompany.__unassigned__ || []).filter((b) => matches(b.name));
+  const noResults = needle && Object.keys(groupedCompanies).length === 0 && unassignedBrands.length === 0;
 
   function CompanyCard({ company }) {
-    const list = brandsByCompany[company._id] || [];
+    const list = visibleBrands(company._id, company.name);
     const c = colorFor(company.name);
     return (
       <div className="card relative flex flex-col overflow-hidden !p-0">
@@ -229,6 +244,22 @@ export default function CompaniesAndBrands() {
         </button>
       </div>
 
+      {!loading && (companies.length > 0 || brands.length > 0) && (
+        <div className="mb-5 flex items-center gap-2">
+          <input
+            className="input max-w-sm"
+            placeholder="Search companies or brands…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          {q && (
+            <button className="btn-ghost" onClick={() => setQ("")}>
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <CardSkeleton />
@@ -243,6 +274,13 @@ export default function CompaniesAndBrands() {
             hint="Create a company, then add brands under it."
             action="+ New Company"
             onAction={openNewCompany}
+          />
+        </div>
+      ) : noResults ? (
+        <div className="card">
+          <EmptyState
+            icon="🔍"
+            title={`No company or brand matches "${q.trim()}".`}
           />
         </div>
       ) : (

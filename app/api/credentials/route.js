@@ -1,16 +1,17 @@
 import { connectDB } from '@/lib/mongodb';
 import { oid } from '@/lib/objectId';
 import { getSession } from '@/lib/auth';
-import { encrypt } from '@/lib/crypto';
+import { encrypt, decrypt } from '@/lib/crypto';
 import { NextResponse } from 'next/server';
 
-// Never project the encrypted password blob into list responses — reveal
-// is the only endpoint allowed to touch it, and only after the viewer
-// re-enters their own login password.
+// The encrypted blob is fetched only to decrypt it — list responses carry
+// the plaintext `password` so the page can show it directly (logged-in
+// users only), never the blob itself.
 const LIST_FIELDS = {
     service: 1, name: 1, username: 1, notes: 1, createdBy: 1, createdByName: 1,
     createdAt: 1, updatedAt: 1, lastAccessedByName: 1, lastAccessedAt: 1,
     billingStatus: 1, billingAmount: 1, nextPaymentDate: 1, cardLast4: 1,
+    encryptedPassword: 1,
 };
 
 export async function GET() {
@@ -21,7 +22,11 @@ export async function GET() {
         .find({ deleted: { $ne: true } }, { projection: LIST_FIELDS })
         .sort({ createdAt: -1 })
         .toArray();
-    return NextResponse.json(creds);
+    return NextResponse.json(creds.map(({ encryptedPassword, ...c }) => {
+        let password = null; // null = couldn't decrypt (CREDENTIALS_SECRET changed)
+        try { password = decrypt(encryptedPassword); } catch { /* leave null */ }
+        return { ...c, password };
+    }));
 }
 
 export async function POST(req) {
