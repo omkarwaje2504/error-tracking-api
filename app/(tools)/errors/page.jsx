@@ -41,7 +41,7 @@ import {
   CartesianGrid,
 } from "recharts";
 
-const API = "https://my-server-jade-beta.vercel.app/api/error";
+const API = "https://error-tracking-api.vercel.app/api/error";
 const ANALYTICS = `${API}/analytics`;
 const EXPORT = `${API}/export`;
 const ALLOWED_STATUSES = ["pending", "resolved", "rejected"];
