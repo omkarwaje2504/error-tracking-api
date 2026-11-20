@@ -1,5 +1,4 @@
-import { connectDB } from '@/lib/mongodb';
-import { oid } from '@/lib/objectId';
+import { query, insertRow } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 
@@ -7,16 +6,16 @@ import { NextResponse } from 'next/server';
 export async function GET(req, { params }) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const { id } = await params;
 
-    const logs = await db.collection('progress').aggregate([
-        { $match: { task: oid(id), deleted: { $ne: true } } },
-        { $sort: { date: -1, createdAt: -1 } },
-        { $lookup: { from: 'users', localField: 'user', foreignField: '_id', as: 'user' } },
-        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-        { $project: { date: 1, added: 1, completed: 1, declined: 1, j2k: 1, note: 1, createdAt: 1, 'user.name': 1 } },
-    ]).toArray();
+    const logs = await query(
+        `SELECT pr."_id", pr."date", pr."added", pr."completed", pr."declined", pr."j2k", pr."note", pr."createdAt",
+                CASE WHEN u."_id" IS NULL THEN NULL ELSE json_build_object('name', u."name") END AS "user"
+         FROM progress pr LEFT JOIN users u ON u."_id" = pr."user"
+         WHERE pr."task" = $1 AND NOT pr."deleted"
+         ORDER BY pr."date" DESC, pr."createdAt" DESC`,
+        [id]
+    );
 
     const totals = logs.reduce(
         (acc, l) => ({
@@ -35,12 +34,11 @@ export async function GET(req, { params }) {
 export async function POST(req, { params }) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const { id } = await params;
     const { date, added, completed, declined, j2k, note } = await req.json();
 
-    const doc = {
-        task: oid(id),
+    const doc = await insertRow('progress', {
+        task: id,
         date: date || new Date().toISOString().slice(0, 10),
         added: Number(added) || 0,
         completed: Number(completed) || 0,
@@ -49,10 +47,9 @@ export async function POST(req, { params }) {
         // generation count for the day, alongside the usual add/done/decline.
         j2k: Number(j2k) || 0,
         note: note || '',
-        user: oid(session.id),
+        user: session.id,
         deleted: false,
         createdAt: new Date(),
-    };
-    const { insertedId } = await db.collection('progress').insertOne(doc);
-    return NextResponse.json({ _id: insertedId, ...doc });
+    });
+    return NextResponse.json(doc);
 }

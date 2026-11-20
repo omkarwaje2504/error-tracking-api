@@ -1,16 +1,15 @@
-import { connectDB } from '@/lib/mongodb';
+import { queryOne } from '@/lib/db';
 import bcrypt from 'bcryptjs';
 import { signToken } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 
 export async function POST(req) {
-    const db = await connectDB();
     const { email, password } = await req.json();
-    const user = await db.collection('users').findOne({ email, deleted: { $ne: true } });
+    const user = await queryOne(`SELECT * FROM users WHERE "email" = $1 AND NOT "deleted" LIMIT 1`, [email]);
     if (!user) return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     const match = await bcrypt.compare(password, user.password);
     if (!match) return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
-    const token = signToken({ id: user._id.toString(), role: user.role, team: user.team, name: user.name });
+    const token = signToken({ id: user._id, role: user.role, team: user.team, name: user.name });
     // Same shape as /api/auth/me returns, so the client can cache this response
     // directly as the session instead of immediately re-fetching it.
     const res = NextResponse.json({ id: user._id, name: user.name, role: user.role, team: user.team });

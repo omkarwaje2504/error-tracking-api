@@ -1,6 +1,9 @@
 import { SourceMapConsumer } from "source-map-js";
-import clientPromise from "@/lib/mongodb";
-import { ObjectId } from "mongodb";
+import { query, queryOne, insertRow, isId } from "@/lib/db";
+
+// Every column except the (large) screenshot — list views stay light.
+const LIST_COLUMNS = `"_id", "projectId", "error", "mappedStack", "deviceInfo", "locationInfo",
+  "geo", "city", "state", "country", "timestamp"`;
 
 /* ───────────────────── Route Config (Next.js 15+) ───────────────────── */
 
@@ -291,19 +294,16 @@ export async function GET(request) {
     const id = searchParams.get("id");
     const projectId = searchParams.get("projectId");
 
-    const client = await clientPromise;
-    const collection = client.db("errors").collection("pixpro");
-
     /* ── Single error detail (full doc, incl. screenshot) ── */
     if (id) {
-      if (!ObjectId.isValid(id)) {
+      if (!isId(id)) {
         return Response.json(
           { success: false, message: "Invalid ObjectId." },
           { status: 400, headers: corsHeaders },
         );
       }
 
-      const doc = await collection.findOne({ _id: new ObjectId(id) });
+      const doc = await queryOne(`SELECT * FROM error_logs WHERE "_id" = $1`, [id]);
 
       if (!doc) {
         return Response.json(
@@ -329,18 +329,19 @@ export async function GET(request) {
       Number.isNaN(rawLimit) || rawLimit <= 0 ? 20 : Math.min(rawLimit, 200);
     const skip = (page - 1) * limit;
 
-    const query = projectId ? { projectId } : {};
+    const filter = projectId ? `WHERE "projectId" = $1` : "";
+    const filterParams = projectId ? [projectId] : [];
+    const n = filterParams.length;
 
-    const [errors, total] = await Promise.all([
-      collection
-        .find(query)
-        .sort({ timestamp: -1 })
-        .skip(skip)
-        .limit(limit)
-        .project({ screenshot: 0 }) // list view stays light
-        .toArray(),
-      collection.countDocuments(query),
+    const [errors, totalRow] = await Promise.all([
+      query(
+        `SELECT ${LIST_COLUMNS} FROM error_logs ${filter}
+         ORDER BY "timestamp" DESC LIMIT $${n + 1} OFFSET $${n + 2}`,
+        [...filterParams, limit, skip],
+      ),
+      queryOne(`SELECT count(*)::int AS n FROM error_logs ${filter}`, filterParams),
     ]);
+    const total = totalRow.n;
 
     return Response.json(
       {
@@ -390,27 +391,22 @@ export async function POST(request) {
       reverseGeocode(body.geo?.lat, body.geo?.lon).catch(() => ({})),
     ]);
 
-    const client = await clientPromise;
-
-    await client
-      .db("errors")
-      .collection("pixpro")
-      .insertOne({
-        projectId: body.projectId || "unknown",
-        error: {
-          message: body.error.message,
-          name: body.error.name ?? "Error",
-          stack: body.error.stack ?? null,
-        },
-        mappedStack,
-        deviceInfo: body.deviceInfo ?? null,
-        locationInfo: body.locationInfo ?? null,
-        geo: body.geo ?? {},
-        city: location.city ?? null,
-        state: location.state ?? null,
-        country: location.country ?? null,
-        timestamp: new Date(),
-      });
+    await insertRow("error_logs", {
+      projectId: body.projectId || "unknown",
+      error: {
+        message: body.error.message,
+        name: body.error.name ?? "Error",
+        stack: body.error.stack ?? null,
+      },
+      mappedStack,
+      deviceInfo: body.deviceInfo ?? null,
+      locationInfo: body.locationInfo ?? null,
+      geo: body.geo ?? {},
+      city: location.city ?? null,
+      state: location.state ?? null,
+      country: location.country ?? null,
+      timestamp: new Date(),
+    });
 
     return Response.json(
       { success: true, message: "Logged with source map." },
@@ -435,23 +431,23 @@ export async function DELETE(request) {
       );
     }
 
-    const client = await clientPromise;
-    const collection = client.db("errors").collection("pixpro");
+    // Returns how many rows a DELETE removed.
+    const deleteWhere = async (cond, params) =>
+      (await query(`DELETE FROM error_logs WHERE ${cond} RETURNING "_id"`, params)).length;
 
     // Single ID
     if (body.id) {
-      if (!ObjectId.isValid(body.id)) {
+      if (!isId(body.id)) {
         return Response.json(
           { success: false, message: "Invalid ObjectId." },
           { status: 400, headers: corsHeaders },
         );
       }
-      const result = await collection.deleteOne({ _id: new ObjectId(body.id) });
+      const deletedCount = await deleteWhere(`"_id" = $1`, [body.id]);
       return Response.json(
         {
-          success: result.deletedCount > 0,
-          message:
-            result.deletedCount > 0 ? "Record deleted." : "Record not found.",
+          success: deletedCount > 0,
+          message: deletedCount > 0 ? "Record deleted." : "Record not found.",
         },
         { headers: corsHeaders },
       );
@@ -459,40 +455,38 @@ export async function DELETE(request) {
 
     // Multiple IDs
     if (Array.isArray(body.ids)) {
-      const objectIds = body.ids
-        .filter((id) => ObjectId.isValid(id))
-        .map((id) => new ObjectId(id));
+      const ids = body.ids.filter(isId);
 
-      if (!objectIds.length) {
+      if (!ids.length) {
         return Response.json(
           { success: false, message: "No valid IDs provided." },
           { status: 400, headers: corsHeaders },
         );
       }
 
-      const result = await collection.deleteMany({ _id: { $in: objectIds } });
+      const deletedCount = await deleteWhere(`"_id" = ANY($1)`, [ids]);
       return Response.json(
-        { success: true, message: `Deleted ${result.deletedCount} record(s).` },
+        { success: true, message: `Deleted ${deletedCount} record(s).` },
         { headers: corsHeaders },
       );
     }
 
     // By projectId
     if (body.projectId) {
-      const result = await collection.deleteMany({ projectId: body.projectId });
+      const deletedCount = await deleteWhere(`"projectId" = $1`, [body.projectId]);
       return Response.json(
-        { success: true, message: `Deleted ${result.deletedCount} record(s).` },
+        { success: true, message: `Deleted ${deletedCount} record(s).` },
         { headers: corsHeaders },
       );
     }
 
     // Nuke everything
     if (body.deleteAll === true) {
-      const result = await collection.deleteMany({});
+      const deletedCount = await deleteWhere("true", []);
       return Response.json(
         {
           success: true,
-          message: `All ${result.deletedCount} record(s) deleted.`,
+          message: `All ${deletedCount} record(s) deleted.`,
         },
         { headers: corsHeaders },
       );

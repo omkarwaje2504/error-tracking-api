@@ -1,27 +1,26 @@
-import { connectDB } from '@/lib/mongodb';
-import { oid } from '@/lib/objectId';
+import { query, queryOne, insertRow, where } from '@/lib/db';
 import { getSession } from '@/lib/auth';
-import { sinceMatch } from '@/lib/sinceQuery';
+import { addSinceFilter } from '@/lib/sinceQuery';
 import { NextResponse } from 'next/server';
 
 export async function GET(req) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const params = new URL(req.url).searchParams;
     const companyId = params.get('company');
     const since = params.get('since');
 
-    const match = sinceMatch(since);
-    if (companyId) match.company = oid(companyId);
+    const w = addSinceFilter(where(), since, 'b');
+    if (companyId) w.add('b."company" = $?', companyId);
 
-    const brands = await db.collection('brands').aggregate([
-        { $match: match },
-        { $sort: { createdAt: -1 } },
-        { $lookup: { from: 'companies', localField: 'company', foreignField: '_id', as: 'company' } },
-        { $unwind: { path: '$company', preserveNullAndEmptyArrays: true } },
-        { $project: { name: 1, createdAt: 1, deleted: 1, 'company._id': 1, 'company.name': 1 } },
-    ]).toArray();
+    const brands = await query(
+        `SELECT b."_id", b."name", b."createdAt", b."deleted",
+                CASE WHEN c."_id" IS NULL THEN NULL ELSE json_build_object('_id', c."_id", 'name', c."name") END AS "company"
+         FROM brands b LEFT JOIN companies c ON c."_id" = b."company"
+         ${w.sql}
+         ORDER BY b."createdAt" DESC`,
+        w.params
+    );
 
     return NextResponse.json(brands);
 }
@@ -29,7 +28,6 @@ export async function GET(req) {
 export async function POST(req) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const { name, company } = await req.json();
     if (!name || !name.trim()) {
         return NextResponse.json({ error: 'Name is required' }, { status: 400 });
@@ -37,18 +35,17 @@ export async function POST(req) {
 
     let companyDoc = null;
     if (company) {
-        companyDoc = await db.collection('companies').findOne({ _id: oid(company) });
+        companyDoc = await queryOne(`SELECT * FROM companies WHERE "_id" = $1`, [company]);
         if (companyDoc && companyDoc.name.trim().toLowerCase() === name.trim().toLowerCase()) {
             return NextResponse.json({ error: 'A brand cannot have the same name as its company' }, { status: 400 });
         }
     }
 
     const now = new Date();
-    const doc = {
+    const brand = await insertRow('brands', {
         name: name.trim(),
-        company: company ? oid(company) : null,
+        company: company || null,
         deleted: false, createdAt: now, updatedAt: now,
-    };
-    const { insertedId } = await db.collection('brands').insertOne(doc);
-    return NextResponse.json({ _id: insertedId, ...doc, company: companyDoc });
+    });
+    return NextResponse.json({ ...brand, company: companyDoc });
 }

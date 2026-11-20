@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import clientPromise from "@/lib/mongodb";
+import { query } from "@/lib/db";
 
 /* ───────────────────── Route Config (Next.js 15+) ───────────────────── */
 
@@ -49,26 +49,28 @@ export async function GET(request) {
 
 
         const from = searchParams.get("from");
-        const query = {};
-        if (projectId) query.projectId = projectId;
+        const conds = [];
+        const params = [];
+        if (projectId) {
+            params.push(projectId);
+            conds.push(`"projectId" = $${params.length}`);
+        }
         if (from) {
             const d = new Date(from);
-            if (!isNaN(d)) query.timestamp = { $gte: d };
+            if (!isNaN(d)) {
+                params.push(d);
+                conds.push(`"timestamp" >= $${params.length}`);
+            }
         }
 
-
-
-        const client = await clientPromise;
-        const collection = client.db("errors").collection("pixpro");
-
-
-
         // Screenshots excluded — keeps the export light
-        const errors = await collection
-            .find(query)
-            .sort({ timestamp: -1 })
-            .project({ screenshot: 0 })
-            .toArray();
+        const errors = await query(
+            `SELECT "_id", "projectId", "error", "mappedStack", "deviceInfo", "locationInfo",
+                    "geo", "city", "state", "country", "timestamp"
+             FROM error_logs ${conds.length ? `WHERE ${conds.join(" AND ")}` : ""}
+             ORDER BY "timestamp" DESC`,
+            params,
+        );
 
         /* ── Build workbook ── */
         const workbook = new ExcelJS.Workbook();

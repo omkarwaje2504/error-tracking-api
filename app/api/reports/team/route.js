@@ -1,4 +1,4 @@
-import { connectDB } from '@/lib/mongodb';
+import { query, where } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { buildDailyReport } from '@/lib/reportBuilder';
 import { NextResponse } from 'next/server';
@@ -9,25 +9,23 @@ export async function GET(req) {
     if (session.role !== 'head' && session.role !== 'lead') {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    const db = await connectDB();
     const url = new URL(req.url);
     const date = url.searchParams.get('date') || new Date().toISOString().slice(0, 10);
     const teamFilter = url.searchParams.get('team');
 
-    const userMatch = { deleted: { $ne: true }, role: { $ne: 'head' } };
+    const w = where().add('NOT "deleted"').add(`"role" IS DISTINCT FROM 'head'`);
     if (session.role === 'lead') {
-        userMatch.team = session.team;
+        w.add('"team" = $?', session.team);
     } else if (teamFilter) {
-        userMatch.team = teamFilter;
+        w.add('"team" = $?', teamFilter);
     }
 
-    const members = await db.collection('users')
-        .find(userMatch).project({ name: 1, role: 1, team: 1 }).sort({ name: 1 }).toArray();
+    const members = await query(`SELECT "_id", "name", "role", "team" FROM users ${w.sql} ORDER BY "name" ASC`, w.params);
 
     const reports = await Promise.all(
         members.map(async (m) => ({
             user: { _id: m._id, name: m.name, role: m.role, team: m.team },
-            ...(await buildDailyReport(db, m._id, date)),
+            ...(await buildDailyReport(m._id, date)),
         }))
     );
 

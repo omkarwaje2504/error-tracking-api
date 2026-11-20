@@ -1,4 +1,4 @@
-import { connectDB } from '@/lib/mongodb';
+import { query, queryOne } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 
@@ -27,8 +27,7 @@ export async function GET(req) {
     const name = new URL(req.url).searchParams.get('name');
     if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 });
 
-    const db = await connectDB();
-    const doc = await db.collection('settings').findOne({ key: keyFor(name, session) });
+    const doc = await queryOne(`SELECT "value" FROM settings WHERE "key" = $1`, [keyFor(name, session)]);
     return NextResponse.json({ name, value: doc?.value ?? null });
 }
 
@@ -41,12 +40,10 @@ export async function PUT(req) {
     const { name, value } = await req.json();
     if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 });
 
-    const db = await connectDB();
-    const key = keyFor(name, session);
-    await db.collection('settings').updateOne(
-        { key },
-        { $set: { key, value, updatedAt: new Date(), updatedBy: session.id } },
-        { upsert: true }
+    await query(
+        `INSERT INTO settings ("key", "value", "updatedAt", "updatedBy") VALUES ($1, $2, now(), $3)
+         ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value", "updatedAt" = now(), "updatedBy" = EXCLUDED."updatedBy"`,
+        [keyFor(name, session), JSON.stringify(value ?? null), session.id]
     );
     return NextResponse.json({ name, value });
 }

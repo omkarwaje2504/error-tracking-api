@@ -1,19 +1,21 @@
-import { connectDB } from '@/lib/mongodb';
-import { oid } from '@/lib/objectId';
+import { queryOne, updateRow } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { logActivity } from '@/lib/activity';
 import { POST_STATUSES } from '@/lib/posts';
 import { postFields } from '@/lib/postFields';
 import { NextResponse } from 'next/server';
 
+function findLivePost(id) {
+    return queryOne(`SELECT * FROM posts WHERE "_id" = $1 AND NOT "deleted"`, [id]);
+}
+
 export async function PUT(req, { params }) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const { id } = await params;
     const body = await req.json();
 
-    const existing = await db.collection('posts').findOne({ _id: oid(id), deleted: { $ne: true } });
+    const existing = await findLivePost(id);
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const set = { ...postFields(body), updatedAt: new Date() };
@@ -30,11 +32,10 @@ export async function PUT(req, { params }) {
         }
     }
 
-    await db.collection('posts').updateOne({ _id: oid(id) }, { $set: set });
-    const post = await db.collection('posts').findOne({ _id: oid(id) });
+    const post = await updateRow('posts', id, set);
 
     if (markedPosted) {
-        await logActivity(db, {
+        await logActivity({
             type: 'post.posted',
             message: `${session.name} marked post "${post.title}" as posted`,
             user: session.id,
@@ -47,17 +48,16 @@ export async function PUT(req, { params }) {
 export async function DELETE(req, { params }) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const { id } = await params;
 
-    const existing = await db.collection('posts').findOne({ _id: oid(id), deleted: { $ne: true } });
+    const existing = await findLivePost(id);
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const isManager = session.role === 'lead' || session.role === 'head';
-    if (!isManager && String(existing.createdBy) !== String(session.id)) {
+    if (!isManager && existing.createdBy !== session.id) {
         return NextResponse.json({ error: 'Only the creator or a lead can delete this post.' }, { status: 403 });
     }
 
     // Soft delete, like tasks/projects — attachments stay in R2.
-    await db.collection('posts').updateOne({ _id: oid(id) }, { $set: { deleted: true, updatedAt: new Date() } });
+    await updateRow('posts', id, { deleted: true, updatedAt: new Date() });
     return NextResponse.json({ ok: true });
 }

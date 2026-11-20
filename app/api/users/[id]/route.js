@@ -1,5 +1,4 @@
-import { connectDB } from '@/lib/mongodb';
-import { oid } from '@/lib/objectId';
+import { query, updateRow, findById, USER_COLUMNS } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
@@ -7,7 +6,6 @@ import bcrypt from 'bcryptjs';
 export async function PUT(req, { params }) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const db = await connectDB();
   const { id } = await params;
   const body = await req.json();
 
@@ -35,15 +33,14 @@ export async function PUT(req, { params }) {
     set.password = await bcrypt.hash(body.password, 10);
   }
 
-  await db.collection('users').updateOne({ _id: oid(id) }, { $set: set });
-  const user = await db.collection('users').findOne({ _id: oid(id) }, { projection: { password: 0 } });
+  await updateRow('users', id, set);
+  const user = await findById('users', id, USER_COLUMNS);
   return NextResponse.json(user);
 }
 
 export async function DELETE(req, { params }) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const db = await connectDB();
   const { id } = await params;
 
   // deleting users is head-only
@@ -57,9 +54,9 @@ export async function DELETE(req, { params }) {
 
   const permanent = new URL(req.url).searchParams.get('permanent') === 'true';
   if (permanent) {
-    await db.collection('users').deleteOne({ _id: oid(id) });
+    await query(`DELETE FROM users WHERE "_id" = $1`, [id]);
     return NextResponse.json({ ok: true, permanent: true });
   }
-  await db.collection('users').updateOne({ _id: oid(id) }, { $set: { deleted: true, updatedAt: new Date() } });
+  await updateRow('users', id, { deleted: true, updatedAt: new Date() });
   return NextResponse.json({ ok: true });
 }

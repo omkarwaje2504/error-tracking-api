@@ -1,4 +1,4 @@
-import clientPromise from "@/lib/mongodb";
+import { query, queryOne } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,42 +22,30 @@ export async function GET(request) {
       1000,
     );
 
-    const match = projectId ? { projectId } : {};
+    const filter = projectId ? `WHERE "projectId" = $1` : "";
+    const filterParams = projectId ? [projectId] : [];
 
-    const client = await clientPromise;
-    const collection = client.db("errors").collection("pixpro");
-
-    const [totalErrors, projectCounts, errorMessages] = await Promise.all([
+    const [totalRow, projectCounts, errorMessages] = await Promise.all([
       // Total errors (respects projectId filter if present)
-      collection.countDocuments(match),
+      queryOne(`SELECT count(*)::int AS n FROM error_logs ${filter}`, filterParams),
 
       // Count per project
-      collection
-        .aggregate([
-          { $match: match },
-          { $group: { _id: "$projectId", count: { $sum: 1 } } },
-          { $sort: { count: -1 } },
-          { $project: { _id: 0, projectId: "$_id", count: 1 } },
-        ])
-        .toArray(),
+      query(
+        `SELECT "projectId", count(*)::int AS "count" FROM error_logs ${filter}
+         GROUP BY "projectId" ORDER BY "count" DESC`,
+        filterParams,
+      ),
 
       // Count per unique error.message (only the message + how often + last seen)
-      collection
-        .aggregate([
-          { $match: match },
-          {
-            $group: {
-              _id: "$error.message",
-              count: { $sum: 1 },
-              lastSeen: { $max: "$timestamp" },
-            },
-          },
-          { $sort: { count: -1 } },
-          { $limit: topN },
-          { $project: { _id: 0, message: "$_id", count: 1, lastSeen: 1 } },
-        ])
-        .toArray(),
+      query(
+        `SELECT "error"->>'message' AS "message", count(*)::int AS "count", max("timestamp") AS "lastSeen"
+         FROM error_logs ${filter}
+         GROUP BY "error"->>'message' ORDER BY "count" DESC
+         LIMIT $${filterParams.length + 1}`,
+        [...filterParams, topN],
+      ),
     ]);
+    const totalErrors = totalRow.n;
 
     return Response.json(
       {

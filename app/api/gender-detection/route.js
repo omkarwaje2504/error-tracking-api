@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import * as ort from "onnxruntime-web";
 import sharp from "sharp";
 import path from "path";
-import clientPromise from "@/lib/mongodb";
+import { insertRow } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -74,9 +74,7 @@ export async function POST(req) {
     const user_platform = req.headers.get("sec-ch-ua-platform");
     const user_url = req.headers.get("origin");
 
-    const client = await clientPromise;
-
-    await client.db("apicalls").collection("analysis").insertOne({
+    await insertRow("api_calls", {
       user_platform,
       user_url,
       type: "gender",

@@ -1,19 +1,19 @@
-import { connectDB } from '@/lib/mongodb';
-import { oid } from '@/lib/objectId';
+import { query, queryOne, insertRow, where } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { logActivity } from '@/lib/activity';
 import { NextResponse } from 'next/server';
 
+const TEAM_MEMBER_IDS = `ARRAY(SELECT "_id" FROM users WHERE "team" = $? AND NOT "deleted")`;
+
 export async function GET(req) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const params = new URL(req.url).searchParams;
     const projectId = params.get('project');
     const parentId = params.get('parent');
     // Children of a task (subtasks or bugs — see POST) share the parentTask
     // field; `kind` narrows which. Legacy children predate this field, so
-    // "subtask" also matches docs with no kind set at all.
+    // "subtask" also matches rows with no kind set at all.
     const kindParam = params.get('kind');
     const teamFilter = params.get('team');
     const assigneeFilter = params.get('assignee');
@@ -28,147 +28,89 @@ export async function GET(req) {
     const page = params.get('page') ? Math.max(1, parseInt(params.get('page'), 10) || 1) : null;
     const limit = params.get('limit') ? Math.min(200, Math.max(1, parseInt(params.get('limit'), 10) || 50)) : null;
 
-    const match = { deleted: { $ne: true } };
+    const w = where().add('NOT t."deleted"');
 
-    if (departmentFilter) match.department = departmentFilter;
+    if (departmentFilter) w.add('t."department" = $?', departmentFilter);
     if (productTypeParam || excludeProductTypesParam) {
-        const typeMatch = productTypeParam
-            ? { projectType: productTypeParam }
-            : (() => {
-                const excludeTypes = excludeProductTypesParam.split(',');
-                return { projectType: { $nin: excludeTypes.includes('') ? [...excludeTypes, null] : excludeTypes } };
-            })();
-        const eligible = await db.collection('projects')
-            .find({ deleted: { $ne: true }, ...typeMatch }).project({ _id: 1 }).toArray();
-        let ids = eligible.map((p) => p._id);
-        if (projectId) ids = ids.filter((pid) => pid.equals(oid(projectId)));
-        match.project = { $in: ids };
+        let typeCond;
+        let typeValue;
+        if (productTypeParam) {
+            typeCond = '"projectType" = $?';
+            typeValue = productTypeParam;
+        } else {
+            const excludeTypes = excludeProductTypesParam.split(',');
+            typeCond = excludeTypes.includes('')
+                ? `coalesce("projectType", '') <> ALL($?)`
+                : `("projectType" IS NULL OR "projectType" <> ALL($?))`;
+            typeValue = excludeTypes;
+        }
+        w.add(`t."project" IN (SELECT "_id" FROM projects WHERE NOT "deleted" AND ${typeCond})`, typeValue);
+        if (projectId) w.add('t."project" = $?', projectId);
     } else if (projectId) {
-        match.project = oid(projectId);
+        w.add('t."project" = $?', projectId);
     }
     if (parentId) {
-        match.parentTask = oid(parentId);        // children of one task
-        if (kindParam === 'bug') match.kind = 'bug';
-        else if (kindParam === 'subtask') match.kind = { $ne: 'bug' };
+        w.add('t."parentTask" = $?', parentId);        // children of one task
+        if (kindParam === 'bug') w.add(`t."kind" = 'bug'`);
+        else if (kindParam === 'subtask') w.add(`t."kind" IS DISTINCT FROM 'bug'`);
     } else {
-        match.parentTask = { $in: [null, undefined] }; // only top-level in main list
+        w.add('t."parentTask" IS NULL'); // only top-level in main list
     }
-    if (teamFilter) {
-        const members = await db.collection('users')
-            .find({ team: teamFilter, deleted: { $ne: true } }).project({ _id: 1 }).toArray();
-        match.assignedTo = { $in: members.map((u) => u._id) };
+
+    // Assignee scoping — later rules replace earlier ones, as before:
+    // team filter < explicit assignee < "mine" / team-member self-scope.
+    let assignCond = null;
+    if (teamFilter) assignCond = [`t."assignedTo" && ${TEAM_MEMBER_IDS}`, teamFilter];
+    if (assigneeFilter) assignCond = ['$? = ANY(t."assignedTo")', assigneeFilter];
+    if (mineOnly || session.role === 'team-member') {
+        // Personal "my tasks" view (dashboard) is always self-scoped,
+        // regardless of role; team-members only ever see their own.
+        assignCond = ['$? = ANY(t."assignedTo")', session.id];
     }
-    if (assigneeFilter) {
-        match.assignedTo = oid(assigneeFilter);
-    }
+    if (assignCond) w.add(...assignCond);
+
     // 'active' = not yet fully signed off (pending or awaiting lead review).
-    if (statusFilter === 'active') match.status = { $in: ['pending', 'done'] };
-    else if (statusFilter === 'done') match.status = 'done';
-    else if (statusFilter === 'completed') match.status = 'completed';
-    if (priorityFilter) match.priority = priorityFilter;
+    if (statusFilter === 'active') w.add(`t."status" IN ('pending', 'done')`);
+    else if (statusFilter === 'done') w.add(`t."status" = 'done'`);
+    else if (statusFilter === 'completed') w.add(`t."status" = 'completed'`);
+    if (priorityFilter) w.add('t."priority" = $?', priorityFilter);
 
-
-    if (mineOnly) {
-        // Personal "my tasks" view (dashboard) — always self-scoped, regardless of role.
-        match.assignedTo = oid(session.id);
-    } else if (session.role === 'team-member') {
-        match.assignedTo = oid(session.id);
-    } else if (session.role === 'lead') {
-        const teammates = await db.collection('users')
-            .find({ team: session.team, deleted: { $ne: true } }).project({ _id: 1 }).toArray();
-        match.$or = [
-            { assignedTo: { $in: teammates.map((u) => u._id) } },
-            { createdBy: oid(session.id) },
-        ];
+    if (!mineOnly && session.role === 'lead') {
+        w.add(`(t."assignedTo" && ${TEAM_MEMBER_IDS} OR t."createdBy" = $?)`, session.team, session.id);
     }
 
-    const total = (page || limit) ? await db.collection('tasks').countDocuments(match) : null;
+    const total = (page || limit)
+        ? (await queryOne(`SELECT count(*)::int AS n FROM tasks t ${w.sql}`, w.params)).n
+        : null;
 
-    const tasks = await db.collection('tasks').aggregate([
-        { $match: match },
-        { $sort: { createdAt: -1 } },
-        ...(limit ? [{ $skip: ((page || 1) - 1) * limit }, { $limit: limit }] : []),
-        {
-            $lookup: {
-                from: 'projects', localField: 'project', foreignField: '_id', as: 'project',
-                pipeline: [
-                    { $lookup: { from: 'brands', localField: 'brand', foreignField: '_id', as: 'brand' } },
-                    { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
-                    { $lookup: { from: 'companies', localField: 'brand.company', foreignField: '_id', as: 'brand.company' } },
-                    { $unwind: { path: '$brand.company', preserveNullAndEmptyArrays: true } },
-                    { $project: { name: 1, projectType: 1, 'brand.name': 1, 'brand.company.name': 1 } },
-                ],
-            }
-        },
-        { $unwind: { path: '$project', preserveNullAndEmptyArrays: true } },
-        { $lookup: { from: 'users', localField: 'assignedTo', foreignField: '_id', as: 'assignedTo' } },
-        { $lookup: { from: 'users', localField: 'createdBy', foreignField: '_id', as: 'createdBy' } },
-        { $unwind: { path: '$createdBy', preserveNullAndEmptyArrays: true } },
-        {
-            $project: {
-                title: 1, description: 1, status: 1, createdAt: 1, completedAt: 1, revertNote: 1,
-                trackProgress: 1, unit: 1, target: 1, trackJ2K: 1, parentTask: 1, department: 1,
-                priority: 1, dueDate: 1, stageType: 1, stageId: 1, attachments: 1, pinned: 1,
-                isEvideo: 1, evideoRows: 1,
-                'project._id': 1, 'project.name': 1, 'project.projectType': 1,
-                'assignedTo._id': 1, 'assignedTo.name': 1, 'assignedTo.team': 1,
-                'createdBy._id': 1, 'createdBy.name': 1,
-            }
-        },
-        {
-            $lookup: {
-                from: 'progress',
-                let: { taskId: '$_id' },
-                pipeline: [
-                    { $match: { $expr: { $eq: ['$task', '$$taskId'] }, deleted: { $ne: true } } },
-                    { $group: { _id: null, added: { $sum: '$added' }, completed: { $sum: '$completed' }, declined: { $sum: '$declined' }, j2k: { $sum: '$j2k' } } },
-                ],
-                as: 'progress',
-            }
-        },
-        {
-            $lookup: {
-                from: 'tasks',
-                let: { taskId: '$_id' },
-                pipeline: [
-                    { $match: { $expr: { $and: [{ $eq: ['$parentTask', '$$taskId'] }, { $ne: ['$kind', 'bug'] }] }, deleted: { $ne: true } } },
-                    {
-                        $group: {
-                            _id: null,
-                            total: { $sum: 1 },
-                            done: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
-                        }
-                    },
-                ],
-                as: 'subCount',
-            }
-        },
-        {
-            $lookup: {
-                from: 'tasks',
-                let: { taskId: '$_id' },
-                pipeline: [
-                    { $match: { $expr: { $and: [{ $eq: ['$parentTask', '$$taskId'] }, { $eq: ['$kind', 'bug'] }] }, deleted: { $ne: true } } },
-                    {
-                        $group: {
-                            _id: null,
-                            total: { $sum: 1 },
-                            done: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
-                        }
-                    },
-                ],
-                as: 'bugCount',
-            }
-        },
+    const paging = limit ? `LIMIT ${w.next(limit)} OFFSET ${w.next(((page || 1) - 1) * limit)}` : '';
 
-        {
-            $addFields: {
-                progress: { $ifNull: [{ $arrayElemAt: ['$progress', 0] }, { added: 0, completed: 0, declined: 0, j2k: 0 }] },
-                subCount: { $ifNull: [{ $arrayElemAt: ['$subCount', 0] }, { total: 0, done: 0 }] },
-                bugCount: { $ifNull: [{ $arrayElemAt: ['$bugCount', 0] }, { total: 0, done: 0 }] },
-            }
-        },
-    ]).toArray();
+    const tasks = await query(
+        `SELECT t."_id", t."title", t."description", t."status", t."createdAt", t."completedAt", t."revertNote",
+                t."trackProgress", t."unit", t."target", t."trackJ2K", t."parentTask", t."department",
+                t."priority", t."dueDate", t."stageType", t."stageId", t."attachments", t."pinned",
+                t."isEvideo", t."evideoRows",
+                CASE WHEN p."_id" IS NULL THEN NULL
+                     ELSE json_build_object('_id', p."_id", 'name', p."name", 'projectType', p."projectType") END AS "project",
+                coalesce((SELECT json_agg(json_build_object('_id', u."_id", 'name', u."name", 'team', u."team"))
+                          FROM users u WHERE u."_id" = ANY(t."assignedTo")), '[]'::json) AS "assignedTo",
+                CASE WHEN cb."_id" IS NULL THEN NULL ELSE json_build_object('_id', cb."_id", 'name', cb."name") END AS "createdBy",
+                (SELECT json_build_object(
+                            'added', coalesce(sum(pr."added"), 0), 'completed', coalesce(sum(pr."completed"), 0),
+                            'declined', coalesce(sum(pr."declined"), 0), 'j2k', coalesce(sum(pr."j2k"), 0))
+                 FROM progress pr WHERE pr."task" = t."_id" AND NOT pr."deleted") AS "progress",
+                (SELECT json_build_object('total', count(*), 'done', count(*) FILTER (WHERE c."status" = 'completed'))
+                 FROM tasks c WHERE c."parentTask" = t."_id" AND c."kind" IS DISTINCT FROM 'bug' AND NOT c."deleted") AS "subCount",
+                (SELECT json_build_object('total', count(*), 'done', count(*) FILTER (WHERE c."status" = 'completed'))
+                 FROM tasks c WHERE c."parentTask" = t."_id" AND c."kind" = 'bug' AND NOT c."deleted") AS "bugCount"
+         FROM tasks t
+         LEFT JOIN projects p ON p."_id" = t."project"
+         LEFT JOIN users cb ON cb."_id" = t."createdBy"
+         ${w.sql}
+         ORDER BY t."createdAt" DESC
+         ${paging}`,
+        w.params
+    );
 
     if (total !== null) {
         return NextResponse.json({ tasks, total, page: page || 1, limit: limit || total, totalPages: limit ? Math.ceil(total / limit) : 1 });
@@ -179,7 +121,6 @@ export async function GET(req) {
 export async function POST(req) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const {
         title, description, project, assignedTo, trackProgress, unit, target, trackJ2K,
         parentTask, department, priority, dueDate, stageType, stageId, attachments, kind,
@@ -192,11 +133,11 @@ export async function POST(req) {
         return NextResponse.json({ error: 'Project is required' }, { status: 400 });
     }
     const now = new Date();
-    const doc = {
+    const task = await insertRow('tasks', {
         title, description,
-        project: project ? oid(project) : null,
-        assignedTo: (assignedTo || []).map(oid),
-        createdBy: oid(session.id),
+        project: project || null,
+        assignedTo: (assignedTo || []).map(String),
+        createdBy: session.id,
         status: 'pending', deleted: false, createdAt: now, updatedAt: now,
         trackProgress: !!trackProgress,
         unit: unit || '',
@@ -204,7 +145,7 @@ export async function POST(req) {
         // PVR-style tracking: same daily add/done/decline log as any other
         // trackProgress task, plus a J2K file generation count column.
         trackJ2K: !!trackJ2K,
-        parentTask: parentTask ? oid(parentTask) : null,
+        parentTask: parentTask || null,
         department: department || '',
         priority: ['low', 'medium', 'high', 'urgent'].includes(priority) ? priority : 'medium',
         dueDate: dueDate || null,
@@ -219,18 +160,17 @@ export async function POST(req) {
         // Only meaningful on a child (parentTask set): distinguishes a bug
         // filed against a task from a regular subtask/checklist item.
         kind: kind === 'bug' ? 'bug' : null,
-    };
-    const { insertedId } = await db.collection('tasks').insertOne(doc);
+    });
 
     if (!parentTask) {
-        await logActivity(db, {
+        await logActivity({
             type: 'task.created',
             message: `${session.name} created task "${title}"`,
-            project: doc.project,
-            task: insertedId,
+            project: task.project,
+            task: task._id,
             user: session.id,
         });
     }
 
-    return NextResponse.json({ _id: insertedId, ...doc });
+    return NextResponse.json(task);
 }

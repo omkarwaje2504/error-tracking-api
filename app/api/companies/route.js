@@ -1,28 +1,25 @@
-import { connectDB } from '@/lib/mongodb';
+import { query, insertRow, where } from '@/lib/db';
 import { getSession } from '@/lib/auth';
-import { sinceMatch } from '@/lib/sinceQuery';
+import { addSinceFilter } from '@/lib/sinceQuery';
 import { NextResponse } from 'next/server';
 
 export async function GET(req) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const since = new URL(req.url).searchParams.get('since');
-    const companies = await db.collection('companies')
-        .find(sinceMatch(since)).sort({ createdAt: -1 }).toArray();
+    const w = addSinceFilter(where(), since);
+    const companies = await query(`SELECT * FROM companies ${w.sql} ORDER BY "createdAt" DESC`, w.params);
     return NextResponse.json(companies);
 }
 
 export async function POST(req) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const { name } = await req.json();
     if (!name || !name.trim()) {
         return NextResponse.json({ error: 'Name is required' }, { status: 400 });
     }
     const now = new Date();
-    const doc = { name: name.trim(), deleted: false, createdAt: now, updatedAt: now };
-    const { insertedId } = await db.collection('companies').insertOne(doc);
-    return NextResponse.json({ _id: insertedId, ...doc });
+    const company = await insertRow('companies', { name: name.trim(), deleted: false, createdAt: now, updatedAt: now });
+    return NextResponse.json(company);
 }

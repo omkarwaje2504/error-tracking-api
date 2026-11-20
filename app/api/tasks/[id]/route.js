@@ -1,5 +1,4 @@
-import { connectDB } from '@/lib/mongodb';
-import { oid } from '@/lib/objectId';
+import { query, findById, updateRow } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { logActivity } from '@/lib/activity';
 import { NextResponse } from 'next/server';
@@ -7,29 +6,28 @@ import { NextResponse } from 'next/server';
 export async function PUT(req, { params }) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const { id } = await params;
     const body = await req.json();
 
-    const existing = await db.collection('tasks').findOne({ _id: oid(id) });
+    const existing = await findById('tasks', id);
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const set = { updatedAt: new Date() };
     if (body.title !== undefined) set.title = body.title;
     if (body.description !== undefined) set.description = body.description;
-    if (body.project !== undefined) set.project = body.project ? oid(body.project) : null;
-    if (body.assignedTo !== undefined) set.assignedTo = body.assignedTo.map(oid);
+    if (body.project !== undefined) set.project = body.project || null;
+    if (body.assignedTo !== undefined) set.assignedTo = (body.assignedTo || []).map(String);
     if (body.trackProgress !== undefined) set.trackProgress = !!body.trackProgress;
     if (body.unit !== undefined) set.unit = body.unit;
     if (body.target !== undefined) set.target = body.target ? Number(body.target) : null;
     if (body.trackJ2K !== undefined) set.trackJ2K = !!body.trackJ2K;
-    if (body.parentTask !== undefined) set.parentTask = body.parentTask ? oid(body.parentTask) : null;
+    if (body.parentTask !== undefined) set.parentTask = body.parentTask || null;
     if (body.department !== undefined) set.department = body.department;
     if (body.priority !== undefined) set.priority = ['low', 'medium', 'high', 'urgent'].includes(body.priority) ? body.priority : 'medium';
     if (body.dueDate !== undefined) set.dueDate = body.dueDate || null;
     if (body.stageType !== undefined) set.stageType = body.stageType || null;
     if (body.stageId !== undefined) set.stageId = body.stageId || null;
-    if (body.attachments !== undefined) set.attachments = body.attachments;
+    if (body.attachments !== undefined) set.attachments = body.attachments || [];
     if (body.pinned !== undefined) set.pinned = !!body.pinned;
     if (body.isEvideo !== undefined) set.isEvideo = !!body.isEvideo;
     if (body.evideoRows !== undefined) set.evideoRows = Array.isArray(body.evideoRows) ? body.evideoRows : [];
@@ -74,11 +72,10 @@ export async function PUT(req, { params }) {
         }
     }
 
-    await db.collection('tasks').updateOne({ _id: oid(id) }, { $set: set });
-    const task = await db.collection('tasks').findOne({ _id: oid(id) });
+    const task = await updateRow('tasks', id, set);
 
     if (statusEvent) {
-        await logActivity(db, {
+        await logActivity({
             type: statusEvent.type,
             message: `${session.name} ${statusEvent.verb} task "${task.title}"`,
             project: task.project,
@@ -93,17 +90,18 @@ export async function PUT(req, { params }) {
 export async function DELETE(req, { params }) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const { id } = await params;
     const permanent = new URL(req.url).searchParams.get('permanent') === 'true';
 
     if (permanent) {
         if (session.role !== 'head')
             return NextResponse.json({ error: 'Only head can permanently delete' }, { status: 403 });
-        await db.collection('tasks').deleteOne({ _id: oid(id) });
+        await query(`DELETE FROM tasks WHERE "_id" = $1`, [id]);
         return NextResponse.json({ ok: true, permanent: true });
     }
-    await db.collection('tasks').updateOne({ _id: oid(id) }, { $set: { deleted: true, updatedAt: new Date() } });
-    await db.collection('tasks').updateMany({ parentTask: oid(id) }, { $set: { deleted: true, updatedAt: new Date() } });
+    await query(
+        `UPDATE tasks SET "deleted" = true, "updatedAt" = now() WHERE "_id" = $1 OR "parentTask" = $1`,
+        [id]
+    );
     return NextResponse.json({ ok: true });
 }

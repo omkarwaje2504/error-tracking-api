@@ -1,5 +1,4 @@
-import { connectDB } from '@/lib/mongodb';
-import { oid } from '@/lib/objectId';
+import { query, queryOne, insertRow, where } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { logActivity } from '@/lib/activity';
 import { PROJECT_STAGES } from '@/lib/projectStages';
@@ -8,7 +7,6 @@ import { NextResponse } from 'next/server';
 export async function GET(req) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
 
     const params = new URL(req.url).searchParams;
     const brandId = params.get('brand');
@@ -24,57 +22,52 @@ export async function GET(req) {
     const page = params.get('page') ? Math.max(1, parseInt(params.get('page'), 10) || 1) : null;
     const limit = params.get('limit') ? Math.min(200, Math.max(1, parseInt(params.get('limit'), 10) || 50)) : null;
 
-    const match = { deleted: { $ne: true } };
-    if (brandId) match.brand = oid(brandId);
-    if (statusFilter === 'active') match.status = { $ne: 'completed' };
-    else if (statusFilter === 'completed') match.status = 'completed';
-    if (stageParam === 'none') match.currentStage = { $in: ['', null] };
-    else if (stageParam) match.currentStage = stageParam;
+    const w = where().add('NOT p."deleted"');
+    if (brandId) w.add('p."brand" = $?', brandId);
+    if (statusFilter === 'active') w.add(`p."status" IS DISTINCT FROM 'completed'`);
+    else if (statusFilter === 'completed') w.add(`p."status" = 'completed'`);
+    if (stageParam === 'none') w.add(`coalesce(p."currentStage", '') = ''`);
+    else if (stageParam) w.add('p."currentStage" = $?', stageParam);
     if (productTypeParam) {
-        match.projectType = productTypeParam;
+        w.add('p."projectType" = $?', productTypeParam);
     } else if (excludeTypesParam) {
         const excludeTypes = excludeTypesParam.split(',');
-        // Projects created before `projectType` existed have the field
-        // missing rather than ''  — $nin treats missing/null as excludable
-        // too, so hiding "no type" needs `null` alongside the '' sentinel.
-        match.projectType = { $nin: excludeTypes.includes('') ? [...excludeTypes, null] : excludeTypes };
+        // Projects created before `projectType` existed have it null rather
+        // than '' — hiding "no type" ('' in the list) hides those too.
+        if (excludeTypes.includes('')) w.add(`coalesce(p."projectType", '') <> ALL($?)`, excludeTypes);
+        else w.add(`(p."projectType" IS NULL OR p."projectType" <> ALL($?))`, excludeTypes);
     }
     if (companyId) {
-        const companyBrands = await db.collection('brands')
-            .find({ company: oid(companyId), deleted: { $ne: true } }).project({ _id: 1 }).toArray();
-        match.$or = [
-            { company: oid(companyId) },
-            { brand: { $in: companyBrands.map((b) => b._id) } },
-        ];
+        w.add(
+            `(p."company" = $? OR p."brand" IN (SELECT "_id" FROM brands WHERE "company" = $? AND NOT "deleted"))`,
+            companyId, companyId
+        );
     }
 
-    const total = (page || limit) ? await db.collection('projects').countDocuments(match) : null;
+    const total = (page || limit)
+        ? (await queryOne(`SELECT count(*)::int AS n FROM projects p ${w.sql}`, w.params)).n
+        : null;
 
-    const projects = await db.collection('projects').aggregate([
-        { $match: match },
-        { $sort: { pinned: -1, createdAt: -1 } },
-        ...(limit ? [{ $skip: ((page || 1) - 1) * limit }, { $limit: limit }] : []),
-        { $lookup: { from: 'brands', localField: 'brand', foreignField: '_id', as: 'brand' } },
-        { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
-        { $lookup: { from: 'companies', localField: 'company', foreignField: '_id', as: 'company' } },
-        { $unwind: { path: '$company', preserveNullAndEmptyArrays: true } },
-        {
-            $lookup: {
-                from: 'companies', localField: 'brand.company', foreignField: '_id', as: 'brand.company',
-            }
-        },
-        { $unwind: { path: '$brand.company', preserveNullAndEmptyArrays: true } },
-        {
-            $project: {
-                name: 1, description: 1, createdAt: 1, updatedAt: 1, deadline: 1, status: 1, link: 1,
-                client: 1, projectType: 1, pinned: 1, currentStage: 1,
-                salesPerson: 1, servicePerson: 1,
-                'brand._id': 1, 'brand.name': 1, 'brand.company.name': 1,
-                'company._id': 1, 'company.name': 1,
-                sectionCount: { $size: { $ifNull: ['$sections', []] } },
-            }
-        },
-    ]).toArray();
+    const paging = limit ? `LIMIT ${w.next(limit)} OFFSET ${w.next(((page || 1) - 1) * limit)}` : '';
+
+    const projects = await query(
+        `SELECT p."_id", p."name", p."description", p."createdAt", p."updatedAt", p."deadline", p."status", p."link",
+                p."client", p."projectType", p."pinned", p."currentStage", p."salesPerson", p."servicePerson",
+                CASE WHEN b."_id" IS NULL THEN NULL ELSE json_build_object(
+                    '_id', b."_id", 'name', b."name",
+                    'company', CASE WHEN bc."_id" IS NULL THEN NULL ELSE json_build_object('name', bc."name") END
+                ) END AS "brand",
+                CASE WHEN c."_id" IS NULL THEN NULL ELSE json_build_object('_id', c."_id", 'name', c."name") END AS "company",
+                jsonb_array_length(coalesce(p."sections", '[]'::jsonb)) AS "sectionCount"
+         FROM projects p
+         LEFT JOIN brands b ON b."_id" = p."brand"
+         LEFT JOIN companies bc ON bc."_id" = b."company"
+         LEFT JOIN companies c ON c."_id" = p."company"
+         ${w.sql}
+         ORDER BY p."pinned" DESC, p."createdAt" DESC
+         ${paging}`,
+        w.params
+    );
 
     if (total !== null) {
         return NextResponse.json({ projects, total, page: page || 1, limit: limit || total, totalPages: limit ? Math.ceil(total / limit) : 1 });
@@ -85,7 +78,6 @@ export async function GET(req) {
 export async function POST(req) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const {
         name, description, brand, company, client, salesPerson, servicePerson,
         projectType, deadline, link, status, currentStage,
@@ -94,10 +86,10 @@ export async function POST(req) {
         return NextResponse.json({ error: 'Name is required' }, { status: 400 });
     }
     const now = new Date();
-    const doc = {
+    const project = await insertRow('projects', {
         name, description,
-        brand: brand ? oid(brand) : null,
-        company: company ? oid(company) : null,
+        brand: brand || null,
+        company: company || null,
         client: client || '',
         salesPerson: salesPerson?.trim() || '',
         servicePerson: servicePerson?.trim() || '',
@@ -112,19 +104,18 @@ export async function POST(req) {
         pinned: false,
         attachments: [],
         sections: [],
-        createdBy: oid(session.id),
+        createdBy: session.id,
         deleted: false,
         createdAt: now,
         updatedAt: now,
-    };
-    const { insertedId } = await db.collection('projects').insertOne(doc);
+    });
 
-    await logActivity(db, {
+    await logActivity({
         type: 'project.created',
         message: `${session.name} created project "${name}"`,
-        project: insertedId,
+        project: project._id,
         user: session.id,
     });
 
-    return NextResponse.json({ _id: insertedId, ...doc });
+    return NextResponse.json(project);
 }

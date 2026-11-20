@@ -1,12 +1,10 @@
-import { connectDB } from '@/lib/mongodb';
-import { oid } from '@/lib/objectId';
+import { query, updateRow } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 
 export async function PUT(req, { params }) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const { logId } = await params;
     const { date, added, completed, declined, j2k, note } = await req.json();
 
@@ -18,23 +16,22 @@ export async function PUT(req, { params }) {
     if (j2k !== undefined) set.j2k = Number(j2k) || 0;
     if (note !== undefined) set.note = note;
 
-    await db.collection('progress').updateOne({ _id: oid(logId) }, { $set: set });
+    await updateRow('progress', logId, set);
     return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(req, { params }) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    const db = await connectDB();
     const { logId } = await params;
     const permanent = new URL(req.url).searchParams.get('permanent') === 'true';
 
     if (permanent) {
         if (session.role !== 'head')
             return NextResponse.json({ error: 'Only head can permanently delete' }, { status: 403 });
-        await db.collection('progress').deleteOne({ _id: oid(logId) });
+        await query(`DELETE FROM progress WHERE "_id" = $1`, [logId]);
         return NextResponse.json({ ok: true, permanent: true });
     }
-    await db.collection('progress').updateOne({ _id: oid(logId) }, { $set: { deleted: true } });
+    await updateRow('progress', logId, { deleted: true });
     return NextResponse.json({ ok: true });
 }

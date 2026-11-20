@@ -1,4 +1,4 @@
-import { connectDB } from '@/lib/mongodb';
+import { query } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 
@@ -8,15 +8,15 @@ export async function GET(req) {
     if (session.role !== 'head') {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    const db = await connectDB();
     const limit = Math.min(Number(new URL(req.url).searchParams.get('limit')) || 30, 100);
 
-    const entries = await db.collection('activity').aggregate([
-        { $sort: { createdAt: -1 } },
-        { $limit: limit },
-        { $lookup: { from: 'projects', localField: 'project', foreignField: '_id', as: 'project', pipeline: [{ $project: { name: 1 } }] } },
-        { $unwind: { path: '$project', preserveNullAndEmptyArrays: true } },
-    ]).toArray();
+    const entries = await query(
+        `SELECT a.*, CASE WHEN p."_id" IS NULL THEN NULL ELSE json_build_object('_id', p."_id", 'name', p."name") END AS "project"
+         FROM activity a LEFT JOIN projects p ON p."_id" = a."project"
+         ORDER BY a."createdAt" DESC
+         LIMIT $1`,
+        [limit]
+    );
 
     return NextResponse.json(entries);
 }
