@@ -2,28 +2,15 @@
 //
 //   MONGODB_URI="mongodb+srv://…" node --env-file=.env.local scripts/import-from-mongo.mjs
 //
-// Copies every collection into its table (see MAP below). Ids keep their
-// 24-char hex value, so links and references carry over unchanged. Fields
-// with no matching column are dropped; ObjectIds anywhere (including inside
-// JSON like attachments/sections) become plain hex strings. Rows whose "_id"
-// already exists are skipped, so it's safe to re-run.
+// Copies each collection into its table (see MAP below). Ids keep their
+// 24-char hex value, so links carry over unchanged. Fields with no matching
+// column are dropped; ObjectIds anywhere (including inside JSON) become
+// plain hex strings. Rows whose "_id" already exists are skipped, so it's
+// safe to re-run.
 import pg from 'pg';
 import { MongoClient, ObjectId } from 'mongodb';
 
 const MAP = [
-    ['task-tracker', 'users', 'users'],
-    ['task-tracker', 'companies', 'companies'],
-    ['task-tracker', 'brands', 'brands'],
-    ['task-tracker', 'productTypes', 'product_types'],
-    ['task-tracker', 'printers', 'printers'],
-    ['task-tracker', 'projects', 'projects'],
-    ['task-tracker', 'tasks', 'tasks'],
-    ['task-tracker', 'progress', 'progress'],
-    ['task-tracker', 'discussions', 'discussions'],
-    ['task-tracker', 'credentials', 'credentials'],
-    ['task-tracker', 'posts', 'posts'],
-    ['task-tracker', 'settings', 'settings'],
-    ['task-tracker', 'activity', 'activity'],
     ['errors', 'pixpro', 'error_logs'],
     ['apicalls', 'analysis', 'api_calls'],
 ];
@@ -66,7 +53,7 @@ for (const [dbName, collName, table] of MAP) {
         [table]
     );
     const types = Object.fromEntries(cols.map((c) => [c.column_name, c.data_type]));
-    const key = table === 'settings' ? 'key' : '_id';
+    const key = '_id';
     let copied = 0;
     let skipped = 0;
 

@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
 import Shell from "@/components/Shell";
-import { getSession } from "@/lib/session";
 import {
   FaBug,
   FaClock,
@@ -654,15 +652,6 @@ const DeleteAllModal = ({ open, onClose, onConfirm, total, deleting }) => {
    Main dashboard
 ================================================================= */
 export default function ErrorTrackingDashboard() {
-  const router = useRouter();
-  const [user, setUser] = useState(null);
-  useEffect(() => {
-    getSession().then((me) => {
-      if (!me) router.push("/login");
-      else setUser(me);
-    });
-  }, [router]);
-
   // server-driven data
   const [errors, setErrors] = useState([]); // current page rows
   const [analytics, setAnalytics] = useState(null); // full-DB aggregates
@@ -1187,12 +1176,10 @@ export default function ErrorTrackingDashboard() {
   const totalPages = pageInfo.totalPages;
   const safePage = Math.min(page, totalPages);
 
-  if (!user) return null; // auth check still resolving
-
   /* ---------- full-page detail ---------- */
   if (selectedError) {
     return (
-      <Shell user={user}>
+      <Shell>
         <ErrorDetail
           error={selectedError}
           loading={detailLoading}
@@ -1214,7 +1201,7 @@ export default function ErrorTrackingDashboard() {
      Render dashboard
   ================================================================= */
   return (
-    <Shell user={user}>
+    <Shell>
       <Styles />
       <ExportModal
         open={exportOpen}

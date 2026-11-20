@@ -1,8 +1,6 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import Shell from '@/components/Shell';
-import { getSession } from '@/lib/session';
 import VideoCompressTab from '@/components/mediaTools/VideoCompressTab';
 import VideoConvertTab from '@/components/mediaTools/VideoConvertTab';
 import ImageConvertTab from '@/components/mediaTools/ImageConvertTab';
@@ -20,23 +18,13 @@ const TABS = [
 ];
 
 export default function MediaTools() {
-    const router = useRouter();
-    const [user, setUser] = useState(null);
     const [tab, setTab] = useState(TABS[0].key);
-
-    useEffect(() => {
-        (async () => {
-            const me = await getSession();
-            if (!me) return router.push('/login');
-            setUser(me);
-        })();
-    }, []);
 
     const active = TABS.find((t) => t.key === tab) || TABS[0];
     const Active = active.Component;
 
     return (
-        <Shell user={user}>
+        <Shell>
             <div className="mb-7">
                 <h1 className="text-2xl font-semibold sm:text-3xl">Media Tools</h1>
                 <p className="mt-1 text-neutral-500">
